@@ -7,10 +7,8 @@ console.log('https request');
   return new ClientRequest(options, cb);
 };
 
-
-var methods = ["GET", "POST", "PUT", "DELETE", "HEAD", "CONNECT", "OPTIONS", "TRACE"];
+var methods = {"0":"DELETE", "1":"GET", "2":"HEAD", "3":"POST", "4":"PUT", "5":"CONNECT", "6":"OPTIONS", "7":"TRACE"};
 exports.METHODS = methods;
-
 
 exports.get = function(options, cb) {
   var req = exports.request(options, cb);
