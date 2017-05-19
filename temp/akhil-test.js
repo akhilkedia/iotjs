@@ -13,14 +13,15 @@ console.log('akhil-test begin');
 //************Request 1 ************
 options = {
 	method: 'GET',
-//	host: "eu.httpbin.org",
-	host: "localhost",
-	path: "/",
-	port: 4443,
+	host: "eu.httpbin.org",
+	protocol: 'http:',
+//	host: "localhost",
+	path: "/ip",
+	port: 80,
 	headers : {"Content-Type": "application/json", "cache-control": "no-cache"},
-	ca: "./temp/certs/ca.pem",
-	cert: "./temp/certs/client.pem",
-	key: "./temp/certs/client.key"
+//	ca: "./temp/certs/ca.pem",
+//	cert: "./temp/certs/client.pem",
+//	key: "./temp/certs/client.key"
 };
 
 var res_body = '';
@@ -113,14 +114,14 @@ var getResponseHandler2 = function(res) {
 };
 
 
-var req2 = https.request(options2, getResponseHandler2);
-req2.on('socket', function() {
-	console.log("--------In SOCKET CALLBACK--------");
-});
-req2.write("{\"uid\": \"cb19e910d1cb441ba5a318ea88c3ac23\",\"dtid\": \"dt6b12b870304e4dd5a88de2007f7d171e\",\"name\": \"YourTes22\",\"manifestVersion\": -1,\"manifestVersionPolicy\": \"LATEST\"");
-req2.write("}");
-//Note - END MUST BE CALLED!!!!!!
-req2.end();
+//var req2 = https.request(options2, getResponseHandler2);
+//req2.on('socket', function() {
+//	console.log("--------In SOCKET CALLBACK--------");
+//});
+//req2.write("{\"uid\": \"cb19e910d1cb441ba5a318ea88c3ac23\",\"dtid\": \"dt6b12b870304e4dd5a88de2007f7d171e\",\"name\": \"YourTes22\",\"manifestVersion\": -1,\"manifestVersionPolicy\": \"LATEST\"");
+//req2.write("}");
+////Note - END MUST BE CALLED!!!!!!
+//req2.end();
 
 
 

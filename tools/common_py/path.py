@@ -52,6 +52,9 @@ TUV_ROOT = fs.join(DEPS_ROOT, 'libtuv')
 # Root directory for http-parser submodule.
 HTTPPARSER_ROOT = fs.join(DEPS_ROOT, 'http-parser')
 
+# Root directory for libcurl submodule.
+MBEDTLS_ROOT = fs.join(DEPS_ROOT, 'libcurl')
+
 # checktest
 CHECKTEST_PATH = fs.join(TOOLS_ROOT, 'check_test.js')
 

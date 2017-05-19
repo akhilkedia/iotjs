@@ -346,7 +346,7 @@ static void async_callReadOnWrite(GlobalData* globalData){
 
 	uv_timer_start(&(globalData->async_readOnWrite), callReadOnWrite, 0, 0);
 
-	printf("In set_timeout \n");
+	printf("In async_callReadOnWrite \n");
 }
 
 
@@ -362,7 +362,7 @@ ReadBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 {
 	//printf("Entered ReadBodyCallback \n");
 	GlobalData* globalData = (GlobalData*) userp;
-	printf("Entered ReadBodyCallback %d  \n", globalData->curReadIndex);
+	printf("Entered ReadBodyCallback %zu \n", globalData->curReadIndex);
 
 	//If stream wasnt made writable yet, make it so.
 	if(!globalData->isStreamWritable){
@@ -382,12 +382,12 @@ ReadBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 		//send some data
 		if(globalData->curReadIndex < chunkSize){
 			size_t numToCopy = (leftToCopySize < realsize) ? leftToCopySize : realsize;
-			printf("in ReadBodyCallback %d  \n", globalData->curReadIndex);
+			printf("in ReadBodyCallback %zu  \n", globalData->curReadIndex);
 			const char* buf = iotjs_string_data(&(globalData->readChunk));
 			buf = &buf[globalData->curReadIndex];
 			strncpy((char *)contents, buf, numToCopy );
 			globalData->curReadIndex = globalData->curReadIndex+numToCopy;
-			printf("***************** Wrote %d bytes of data ******************\n", numToCopy);
+			printf("***************** Wrote %zu bytes of data ******************\n", numToCopy);
 			return numToCopy;
 		}
 
@@ -599,8 +599,8 @@ static void socket_timeout(uv_timer_t *req){
 		printf("Total bytes Uploaded so far - %f \n", uploadBytes);
 		printf("Total bytes so far - %f \n", totalBytes);
 		printf("LastNumBytes - %f \n", globalData->lastNumBytes);
-		printf("Time so far - %ld \n", totalTime_ms);
-		printf("Time for timeout - %ld \n", ((uint64_t)globalData->timeout_ms + globalData->lastTime));
+		printf("Time so far - %llu \n", totalTime_ms);
+		printf("Time for timeout - %llu \n", ((uint64_t)globalData->timeout_ms + globalData->lastTime));
 
 		if(globalData->lastNumBytes == totalBytes){
 			printf("Got inside first if \n \n");
@@ -623,7 +623,7 @@ static void set_timeout(long ms, GlobalData* globalData) {
 		return;
 	globalData->timeout_ms = ms;
 	//TODO: repeated timeouts
-	uv_timer_start(&(globalData->socket_timeout), socket_timeout, 1, ms);
+	uv_timer_start(&(globalData->socket_timeout), socket_timeout, 1, (uint64_t) ms);
 
 	printf("In set_timeout \n");
 }
@@ -640,7 +640,7 @@ printf("Setting a uv_timer %ld \n", timeout_ms);
 			timeout_ms = 1; //0 means directly call socket_action, but we'll do it in a bit
 		if((globalData->timeout_ms!=-1)&&(timeout_ms > globalData->timeout_ms))
 			timeout_ms = globalData->timeout_ms;
-		uv_timer_start(&(globalData->timeout), on_timeout, timeout_ms, 0);
+		uv_timer_start(&(globalData->timeout), on_timeout,(uint64_t) timeout_ms, 0);
 	}
 	return 0;
 }
@@ -653,7 +653,7 @@ int handle_socket(CURL *easy, curl_socket_t s, int action, void *userp, void *so
 	//	printf("Unpaused in handle_socket \n");
 	//	curl_easy_pause(globalData->curl_easy_handle, CURLPAUSE_CONT);
 	//}
-	curl_context_t *curl_context;
+	curl_context_t *curl_context = NULL;
 	if (action == CURL_POLL_IN || action == CURL_POLL_OUT|| action == CURL_POLL_INOUT) {
 		if (socketp) {
 			curl_context = (curl_context_t*) socketp;
@@ -818,7 +818,7 @@ JHANDLER_FUNCTION(createRequest) {
 
 	JHANDLER_CHECK_ARG(4, string);
 	iotjs_string_t key = JHANDLER_GET_ARG(4, string);
-	printf("Got key in Native Code as %s with length %d \n", iotjs_string_data(&key));
+	printf("Got key in Native Code as %s \n", iotjs_string_data(&key));
 
 	JHANDLER_CHECK_ARG(5, object);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(5, object);
