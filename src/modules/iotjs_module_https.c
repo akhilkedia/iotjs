@@ -587,8 +587,8 @@ static void socket_timeout(uv_timer_t *req){
 	double downloadBytes = 0;
 	double uploadBytes = 0;
 	uint64_t totalTime_ms = 0;
-	if(globalData->timeout_ms!=-1){
 
+	if(globalData->timeout_ms!=-1){
 		curl_easy_getinfo(globalData->curl_easy_handle, CURLINFO_SIZE_DOWNLOAD, &downloadBytes);
 		curl_easy_getinfo(globalData->curl_easy_handle, CURLINFO_SIZE_UPLOAD, &uploadBytes);
 		totalTime_ms = uv_now(globalData->loop);
@@ -777,7 +777,6 @@ void doAll(const char* URL,	const char* method, const char* ca, const char* cert
 		globalData->streamEnded=true;
 	}
 
-
 	curl_multi_setopt(globalData->curl_handle, CURLMOPT_SOCKETFUNCTION, handle_socket);
 	curl_multi_setopt(globalData->curl_handle, CURLMOPT_SOCKETDATA, (void*) globalData);
 	curl_multi_setopt(globalData->curl_handle, CURLMOPT_TIMERFUNCTION, start_timeout);
@@ -799,36 +798,40 @@ void doAll(const char* URL,	const char* method, const char* ca, const char* cert
 
 JHANDLER_FUNCTION(createRequest) {
 	JHANDLER_CHECK_THIS(object);
+	JHANDLER_CHECK_ARGS(2, object, function);
 
-	JHANDLER_CHECK_ARG(0, string);
-	iotjs_string_t url = JHANDLER_GET_ARG(0, string);
-	printf("Got URL in Native Code as %s \n", iotjs_string_data(&url));
+	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
+	const iotjs_jval_t* jcallback = JHANDLER_GET_ARG(1, function);
 
-	JHANDLER_CHECK_ARG(1, string);
-	iotjs_string_t method = JHANDLER_GET_ARG(1, string);
+	iotjs_jval_t jhost = iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING_HOST);
+	iotjs_string_t host = iotjs_jval_as_string(&jhost);
+	iotjs_jval_destroy(&jhost);
+	printf("Got URL in Native Code as %s \n", iotjs_string_data(&host));
+
+	iotjs_jval_t jmethod = iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING_METHOD);
+	iotjs_string_t method = iotjs_jval_as_string(&jmethod);
+	iotjs_jval_destroy(&jmethod);
 	printf("Got method in Native Code as %s \n", iotjs_string_data(&method));
 
-	JHANDLER_CHECK_ARG(2, string);
-	iotjs_string_t ca = JHANDLER_GET_ARG(2, string);
+	iotjs_jval_t jca = iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING_CA);
+	iotjs_string_t ca = iotjs_jval_as_string(&jca);
+	iotjs_jval_destroy(&jca);
 	printf("Got ca in Native Code as %s \n", iotjs_string_data(&ca));
 
-	JHANDLER_CHECK_ARG(3, string);
-	iotjs_string_t cert = JHANDLER_GET_ARG(3, string);
+	iotjs_jval_t jcert = iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING_CERT);
+	iotjs_string_t cert = iotjs_jval_as_string(&jcert);
+	iotjs_jval_destroy(&jcert);
 	printf("Got cert in Native Code as %s \n", iotjs_string_data(&cert));
 
-	JHANDLER_CHECK_ARG(4, string);
-	iotjs_string_t key = JHANDLER_GET_ARG(4, string);
+	iotjs_jval_t jkey = iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING_KEY);
+	iotjs_string_t key = iotjs_jval_as_string(&jkey);
+	iotjs_jval_destroy(&jkey);
 	printf("Got key in Native Code as %s \n", iotjs_string_data(&key));
 
-	JHANDLER_CHECK_ARG(5, object);
-	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(5, object);
+	doAll(iotjs_string_data(&host), iotjs_string_data(&method), iotjs_string_data(&ca), iotjs_string_data(&cert), iotjs_string_data(&key), jthis, jcallback);
 
-	JHANDLER_CHECK_ARG_IF_EXIST(6, function);
-	const iotjs_jval_t* jcallback = JHANDLER_GET_ARG_IF_EXIST(6, function);
-
-	doAll(iotjs_string_data(&url), iotjs_string_data(&method), iotjs_string_data(&ca), iotjs_string_data(&cert), iotjs_string_data(&key), jthis, jcallback);
-
-	iotjs_string_destroy(&url);
+	iotjs_string_destroy(&host);
+	iotjs_string_destroy(&method);
 	iotjs_string_destroy(&ca);
 	iotjs_string_destroy(&cert);
 	iotjs_string_destroy(&key);
@@ -839,12 +842,11 @@ JHANDLER_FUNCTION(createRequest) {
 JHANDLER_FUNCTION(addHeader) {
 	JHANDLER_CHECK_THIS(object);
 
-	JHANDLER_CHECK_ARG(0, string);
+	JHANDLER_CHECK_ARGS(2, string, object);
 	iotjs_string_t header = JHANDLER_GET_ARG(0, string);
 	const char* charHeader = iotjs_string_data(&header);
 	printf("Got header in Native Code as %s \n", charHeader);
 
-	JHANDLER_CHECK_ARG(1, object);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(1, object);
 
 	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
@@ -890,19 +892,15 @@ JHANDLER_FUNCTION(sendRequest) {
 
 JHANDLER_FUNCTION(setTimeout) {
 	JHANDLER_CHECK_THIS(object);
+	JHANDLER_CHECK_ARGS(2, number, object);
 
-	JHANDLER_CHECK_ARG(0, number);
 	double ms = JHANDLER_GET_ARG(0, number);
 	printf("Got timeout time in Native Code as %f \n", ms);
-
-	JHANDLER_CHECK_ARG(1, object);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(1, object);
 
 	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
-
 	//printf(" ------ Can Retrieve the tempvar in NativeCode as ----- %d \n", globalData->tempvar);
 	set_timeout( (long) ms, globalData);
-
 
 	printf("Leaving JHANDLER \n");
 	iotjs_jhandler_return_null(jhandler);
@@ -912,11 +910,13 @@ JHANDLER_FUNCTION(_write) {
 	printf("******************Entered _write JHANDLER *****************\n");
 	JHANDLER_CHECK_THIS(object);
 
-	JHANDLER_CHECK_ARG(0, object);
+	JHANDLER_CHECK_ARGS(2, object, string);
+	//Argument 3 can be null, so not checked here, checked below.
+	JHANDLER_CHECK_ARG(3, function);
+
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
 	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
 
-	JHANDLER_CHECK_ARG(1, string);
 	globalData->readChunk = JHANDLER_GET_ARG(1, string);
 	printf("Got Data in _write as %s \n", iotjs_string_data(&(globalData->readChunk)));
 	globalData->dataToRead=true;
@@ -935,14 +935,11 @@ JHANDLER_FUNCTION(_write) {
 	globalData->readCallback = iotjs_jval_create_copied(callback);
 	printf("Got read callback in _write \n");
 
-	JHANDLER_CHECK_ARG(3, function);
 	const iotjs_jval_t* onwrite = JHANDLER_GET_ARG(3, function);
 
 	globalData->readOnWrite = iotjs_jval_create_copied(onwrite);
 	globalData->toDestroyReadOnWrite = true;
 	printf("Got onwrite callback in _write \n");
-
-
 
 	//JHANDLER_CHECK_ARG(0, number);
 	//double ms = JHANDLER_GET_ARG(0, number);
@@ -955,7 +952,6 @@ JHANDLER_FUNCTION(_write) {
 		uv_timer_start(&(globalData->timeout), on_timeout, 1, 0);
 	}
 
-
 	printf("******************Leaving _write JHANDLER *****************\n");
 	iotjs_jhandler_return_null(jhandler);
 }
@@ -963,9 +959,9 @@ JHANDLER_FUNCTION(_write) {
 JHANDLER_FUNCTION(finishRequest) {
 	printf("******************Entered finishRequest JHANDLER *****************\n");
 	JHANDLER_CHECK_THIS(object);
+	JHANDLER_CHECK_ARG(0, object);
 
 	printf("1 \n");
-	JHANDLER_CHECK_ARG(0, object);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
 	printf("2 \n");
 	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
@@ -984,7 +980,6 @@ JHANDLER_FUNCTION(finishRequest) {
 		uv_timer_start(&(globalData->timeout), on_timeout, 1, 0);
 	}
 
-
 	printf("******************Leaving finishRequest JHANDLER *****************\n");
 	iotjs_jhandler_return_null(jhandler);
 }
@@ -992,8 +987,8 @@ JHANDLER_FUNCTION(finishRequest) {
 JHANDLER_FUNCTION(Abort) {
 	printf("Entering Abort");
 	JHANDLER_CHECK_THIS(object);
-
 	JHANDLER_CHECK_ARG(0, object);
+
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
 	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
 

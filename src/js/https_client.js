@@ -32,11 +32,11 @@ function ClientRequest(options, cb) {
 	var path = options.path || '/';
 	var protocol = options.protocol || 'https:';
 
-	this._host = protocol+'//'+host+':'+port+path;
-	this._method = options.method || 'GET';
-	this._ca = options.ca || '';
-	this._cert = options.cert || '';
-	this._key = options.key || '';
+	this.host = protocol+'//'+host+':'+port+path;
+	this.method = options.method || 'GET';
+	this.ca = options.ca || '';
+	this.cert = options.cert || '';
+	this.key = options.key || '';
 
 	console.log('About to call IncomingMessage Constructor');
 	this._incoming = new IncomingMessage(this);
@@ -49,9 +49,8 @@ function ClientRequest(options, cb) {
 	}
 	this.once('finish', this.onFinish);
 
-
 	console.log('ClientRequest creating request.');
-	httpsNative.createRequest(this._host, this._method, this._ca, this._cert, this._key, this, this.response);
+	httpsNative.createRequest(this, this.response);
 
 	if(options.auth){
 		var headerString = 'Authorization: Basic '+toBase64(options.auth);
