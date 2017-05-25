@@ -17,26 +17,6 @@
 #ifndef IOTJS_MODULE_HTTPS_H_
 #define IOTJS_MODULE_HTTPS_H_
 
-#include "iotjs_def.h"
-#include "iotjs_reqwrap.h"
-#include "iotjs_handlewrap.h"
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
-#include <stdbool.h>
-#include <limits.h>
-#include <curl/curl.h>
-#include <uv.h>
-
-typedef struct {
-  iotjs_reqwrap_t reqwrap;
-  uv_req_t req;
-} IOTJS_VALIDATED_STRUCT(iotjs_https_reqwrap_t);
-
-iotjs_https_reqwrap_t* iotjs_https_reqwrap_create(const iotjs_jval_t* jcallback);
-static void iotjs_https_reqwrap_destroy(iotjs_https_reqwrap_t* https_reqwrap);
-void iotjs_https_reqwrap_dispatched(iotjs_https_reqwrap_t* https_reqwrap);
-const iotjs_jval_t* iotjs_https_reqwrap_jcallback(iotjs_https_reqwrap_t* https_reqwrap);
 
 typedef enum {
 	HTTPS_GET = 0,
@@ -48,10 +28,5 @@ typedef enum {
 	HTTPS_OPTIONS,
 	HTTPS_TRACE
 } HTTPS_Methods;
-
-
-//int easycurl(char* host, char* path, char* method, char* queryParams,
-//		char* mBody, struct curl_slist* headerList, MemoryStruct_s* p_chunk, long* code, char* errormsg);
-
 
 #endif /* IOTJS_MODULE_HTTPS_H_ */

@@ -14,6 +14,15 @@
  */
 
 #include "iotjs_module_https.h"
+#include "iotjs_def.h"
+#include "iotjs_objectwrap.h"
+#include <curl/curl.h>
+#include <uv.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <stdbool.h>
+#include <limits.h>
 #include <inttypes.h>
 #include <stdlib.h>
 
@@ -43,7 +52,6 @@ typedef struct read_data_t{
 typedef struct GlobalData {
 	uv_timer_t timeout;
 	const iotjs_jval_t* jthis;
-	iotjs_https_reqwrap_t* req_wrap;
 	iotjs_https_jobjectwrap_t* jobject_wrap;
 	uv_loop_t *loop;
 	CURLM *curl_handle;
@@ -82,33 +90,8 @@ typedef struct GlobalData {
 
 } GlobalData;
 
-// ------------ Reqwrap Stuff. Dunno Why. :-/ ------------
-iotjs_https_reqwrap_t* iotjs_https_reqwrap_create(const iotjs_jval_t* jcallback){
-	iotjs_https_reqwrap_t* https_reqwrap = IOTJS_ALLOC(iotjs_https_reqwrap_t);
-	IOTJS_VALIDATED_STRUCT_CONSTRUCTOR(iotjs_https_reqwrap_t, https_reqwrap);
-	iotjs_reqwrap_initialize(&_this->reqwrap, jcallback, (uv_req_t*)&_this->req);
-	return https_reqwrap;
-}
 
-static void iotjs_https_reqwrap_destroy(iotjs_https_reqwrap_t* https_reqwrap) {
-	IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_reqwrap_t, https_reqwrap);
-	//uv_req_cleanup(&_this->req);
-	printf ("Cleaning up reqwrap \n ");
-	iotjs_reqwrap_destroy(&_this->reqwrap);
-	IOTJS_RELEASE(https_reqwrap);
-}
-
-void iotjs_https_reqwrap_dispatched(iotjs_https_reqwrap_t* https_reqwrap) {
-	IOTJS_VALIDATABLE_STRUCT_METHOD_VALIDATE(iotjs_https_reqwrap_t, https_reqwrap);
-	iotjs_https_reqwrap_destroy(https_reqwrap);
-}
-
-const iotjs_jval_t* iotjs_https_reqwrap_jcallback(iotjs_https_reqwrap_t* https_reqwrap) {
-	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_reqwrap_t, https_reqwrap);
-	return iotjs_reqwrap_jcallback(&_this->reqwrap);
-}
-
-// ------------ HandleWrap Stuff. Dunno Why. :-/ ------------
+// ------------ Jobjectwrap Stuff. Dunno Why. :-/ ------------
 static void iotjs_https_jobjectwrap_destroy(iotjs_https_jobjectwrap_t* https_jobjectwrap) {
 	printf ("Cleaning up jobjectwrap ERWE SDGFHFDHGSDAFASFDSHDFHFGTESRAWRAW \n");
 	IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_jobjectwrap_t, https_jobjectwrap);
@@ -182,11 +165,6 @@ void destroy_GlobalData(GlobalData* globalData){
 	uv_close((uv_handle_t*)&(globalData->async_readOnWrite), NULL);
 	printf("Leaving check_multi_info Call 2 \n");
 
-	if(globalData->req_wrap != NULL){
-		iotjs_https_reqwrap_dispatched(globalData->req_wrap);
-		globalData->req_wrap = NULL;
-	}
-
 	if(globalData->jobject_wrap != NULL){
 		iotjs_jval_destroy (iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap));
 		//iotjs_https_jobjectwrap_destroy(globalData->jobject_wrap);
@@ -199,7 +177,6 @@ void destroy_GlobalData(GlobalData* globalData){
 	}
 	curl_slist_free_all(globalData->headerList);
 
-
 	free( globalData);
 	return;
 }
@@ -207,8 +184,8 @@ void destroy_GlobalData(GlobalData* globalData){
 // ------------Actual Functions ----------
 
 static void callMessageEnd(GlobalData* globalData){
-	if(globalData->req_wrap){
-		if(iotjs_https_reqwrap_jcallback(globalData->req_wrap)){
+	if(!globalData->jobject_wrap)
+		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
 			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
@@ -223,13 +200,11 @@ static void callMessageEnd(GlobalData* globalData){
 
 			iotjs_jval_destroy(&jobject1);
 			iotjs_jval_destroy(&cb);
-		}
-	}
 }
 
 static void callClose(GlobalData* globalData){
-	if(globalData->req_wrap){
-		if(iotjs_https_reqwrap_jcallback(globalData->req_wrap)){
+	if(!globalData->jobject_wrap)
+		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
 			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
@@ -244,13 +219,11 @@ static void callClose(GlobalData* globalData){
 
 			iotjs_jval_destroy(&jobject1);
 			iotjs_jval_destroy(&cb);
-		}
-	}
 }
 
 static void callTimeout(GlobalData* globalData){
-	if(globalData->req_wrap){
-		if(iotjs_https_reqwrap_jcallback(globalData->req_wrap)){
+	if(!globalData->jobject_wrap)
+		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
 			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
@@ -265,13 +238,11 @@ static void callTimeout(GlobalData* globalData){
 
 			iotjs_jval_destroy(&jobject1);
 			iotjs_jval_destroy(&cb);
-		}
-	}
 }
 
 static void callSocket(GlobalData* globalData){
-	if(globalData->req_wrap){
-		if(iotjs_https_reqwrap_jcallback(globalData->req_wrap)){
+	if(!globalData->jobject_wrap)
+		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
 			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
@@ -286,13 +257,11 @@ static void callSocket(GlobalData* globalData){
 
 			iotjs_jval_destroy(&jobject1);
 			iotjs_jval_destroy(&cb);
-		}
-	}
 }
 
 static void callWriteableSync(GlobalData* globalData){
-	if(globalData->req_wrap){
-		if(iotjs_https_reqwrap_jcallback(globalData->req_wrap)){
+	if(!globalData->jobject_wrap)
+		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
 			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
@@ -307,16 +276,14 @@ static void callWriteableSync(GlobalData* globalData){
 
 			iotjs_jval_destroy(&jobject1);
 			iotjs_jval_destroy(&cb);
-		}
-	}
 }
 
-static void callReadOnWrite(uv_timer_t *req){
-	GlobalData* globalData = (GlobalData*) (req->data);
+static void callReadOnWrite(uv_timer_t *timer){
+	GlobalData* globalData = (GlobalData*) (timer->data);
 	uv_timer_stop(&(globalData->async_readOnWrite));
 	printf("Entered callReadOnWrite\n");
-	if(globalData->req_wrap){
-		if(iotjs_https_reqwrap_jcallback(globalData->req_wrap)){
+	if(!globalData->jobject_wrap)
+		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
 
@@ -337,8 +304,6 @@ static void callReadOnWrite(uv_timer_t *req){
 				//iotjs_jval_destroy(&(globalData->readOnWrite));
 				//globalData->toDestroyReadOnWrite = false;
 			//}
-		}
-	}
 	printf("Exiting callReadOnWrite\n");
 }
 
@@ -435,8 +400,8 @@ WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 	}
 
 	//TODO: Separate this out in a different function
-	if(globalData->req_wrap){
-		if(iotjs_https_reqwrap_jcallback(globalData->req_wrap)){
+	if(!globalData->jobject_wrap)
+		return 0;
 			iotjs_jargs_t jarg = iotjs_jargs_create(1);
 			iotjs_jval_t jResultArr = iotjs_jval_create_byte_array(realsize, contents);
 			iotjs_string_t jResultString = iotjs_string_create_with_size(contents, realsize);
@@ -459,8 +424,6 @@ WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 			iotjs_jval_destroy(&jResultArr);
 			iotjs_string_destroy(&jResultString);
 			iotjs_jargs_destroy(&jarg);
-		}
-	}
 	printf("Exiting WriteMemoryCallback \n\n");
 
 	return realsize;
@@ -552,8 +515,8 @@ void check_multi_info(GlobalData* globalData) {
 	}
 }
 
-void curl_perform(uv_poll_t *req, int status, int events) {
-	curl_context_t *context = (curl_context_t*) req->data ;
+void curl_perform(uv_poll_t *poll, int status, int events) {
+	curl_context_t *context = (curl_context_t*) poll->data ;
 	GlobalData* globalData = context->globalData;
 
 	printf("Entered in curl_perform \n");
@@ -572,18 +535,18 @@ void curl_perform(uv_poll_t *req, int status, int events) {
 	printf("Leaving curl_perform Call \n");
 }
 
-static void on_timeout(uv_timer_t *req) {
+static void on_timeout(uv_timer_t *timer) {
 //TODO: do I need to unref/close the timeout handle?
-	GlobalData* globalData = (GlobalData*) (req->data);
-	uv_timer_stop(req);
+	GlobalData* globalData = (GlobalData*) (timer->data);
+	uv_timer_stop(timer);
 	int running_handles;
 	curl_multi_socket_action(globalData->curl_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
 	check_multi_info(globalData);
 	printf("In on timeout \n");
 }
-static void socket_timeout(uv_timer_t *req){
+static void socket_timeout(uv_timer_t *timer){
 	//TODO: do I need to unref/close the timeout handle?
-	GlobalData* globalData = (GlobalData*) (req->data);
+	GlobalData* globalData = (GlobalData*) (timer->data);
 	double downloadBytes = 0;
 	double uploadBytes = 0;
 	uint64_t totalTime_ms = 0;
@@ -710,20 +673,14 @@ void doAll(const char* URL,	const char* method, const char* ca, const char* cert
 	}
 
 	globalData->loop = iotjs_environment_loop(iotjs_environment_get());
-	//TODO remove reqwrap
-	globalData->req_wrap = iotjs_https_reqwrap_create(jcallback);
+
 	globalData->jobject_wrap = iotjs_https_jobjectwrap_create(jthis, globalData);
 	printf("The address of jobject_Wrap is %p \n", globalData->jobject_wrap);
 
 	IOTJS_ASSERT(iotjs_jval_is_object(iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap)));
 	IOTJS_ASSERT(iotjs_jval_get_object_native_handle(jthis) != 0);
-	globalData->jthis=jthis;
+	//globalData->jthis=jthis;
 	globalData->headerList = NULL;
-
-	//if (jcallback!=NULL)
-	//	globalData->req_wrap = iotjs_https_reqwrap_create(jcallback);
-	//else
-	//	globalData->req_wrap = NULL;
 
 	globalData->curl_handle = curl_multi_init();
 	globalData->timeout.data = (void*) globalData;
