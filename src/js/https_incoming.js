@@ -39,10 +39,10 @@ console.log('IncomingMessage constructor');
 	this.OnBody = cbOnData;
 	this.OnEnd = cbOnEnd;
 	this.OnError = cbOnError;
-	this.OnClose = cbOnClose;
+	this.OnClosed = cbOnClosed;
 	this.OnTimeout = cbOnTimeout;
 	this.OnSocket = cbOnSocket;
-	this.OnWriteable = cbOnWriteable;
+	this.OnWritable = cbOnWritable;
 console.log('IncomingMessage constructor end');
 
 }
@@ -196,7 +196,7 @@ function cbOnEnd() {
 }
 
 // TODO: Verify - First end, then close.
-function cbOnClose() {
+function cbOnClosed() {
 	console.log('in cbOnClose ');
 	var incoming = this;
 	var parser = incoming.parser;
@@ -278,7 +278,7 @@ function cbOnSocket() {
 	clientRequest.emit('socket');
 }
 
-function cbOnWriteable() {
+function cbOnWritable() {
 	console.log("Writable");
 	var incoming = this;
 	var clientRequest = incoming.clientRequest;

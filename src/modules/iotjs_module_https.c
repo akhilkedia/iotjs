@@ -141,95 +141,21 @@ void destroy_GlobalData(GlobalData* globalData){
 
 // ------------Actual Functions ----------
 
-static void callMessageEnd(GlobalData* globalData){
+static void javascriptCallback(GlobalData* globalData, const char* property){
 	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return;
-			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
-			const iotjs_jval_t* jobject = &(globalData->jthis_native);
-			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
-			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnEnd");
+	const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
+	const iotjs_jval_t* jobject = &(globalData->jthis_native);
+	iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, IOTJS_MAGIC_STRING__INCOMING);
+	iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, property);
 
-			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
+	IOTJS_ASSERT(iotjs_jval_is_function(&cb));
+	printf("Invoking CallBack To JS %s\n", property);
+	iotjs_make_callback(&cb, &jobject1, jarg);
 
-			printf("Invoking CallBack To JS callMessageEnd\n");
-			iotjs_make_callback(&cb, &jobject1, jarg);
-
-			iotjs_jval_destroy(&jobject1);
-			iotjs_jval_destroy(&cb);
-}
-
-static void callClose(GlobalData* globalData){
-	if( iotjs_jval_is_null( &globalData->jthis_native ))
-		return;
-			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
-
-			const iotjs_jval_t* jobject = &(globalData->jthis_native);
-			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
-			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnClose");
-
-			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
-
-			printf("Invoking CallBack To JS callClose\n");
-			iotjs_make_callback(&cb, &jobject1, jarg);
-
-			iotjs_jval_destroy(&jobject1);
-			iotjs_jval_destroy(&cb);
-}
-
-static void callTimeout(GlobalData* globalData){
-	if( iotjs_jval_is_null( &globalData->jthis_native ))
-		return;
-			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
-
-			const iotjs_jval_t* jobject = &(globalData->jthis_native);
-			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
-			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnTimeout");
-
-			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
-
-			printf("Invoking CallBack To JS callTimeout\n");
-			iotjs_make_callback(&cb, &jobject1, jarg);
-
-			iotjs_jval_destroy(&jobject1);
-			iotjs_jval_destroy(&cb);
-}
-
-static void callSocket(GlobalData* globalData){
-	if( iotjs_jval_is_null( &globalData->jthis_native ))
-		return;
-			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
-
-			const iotjs_jval_t* jobject = &(globalData->jthis_native);
-			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
-			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnSocket");
-
-			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
-
-			printf("Invoking CallBack To JS callSocket\n");
-			iotjs_make_callback(&cb, &jobject1, jarg);
-
-			iotjs_jval_destroy(&jobject1);
-			iotjs_jval_destroy(&cb);
-}
-
-static void callWriteableSync(GlobalData* globalData){
-	if( iotjs_jval_is_null( &globalData->jthis_native ))
-		return;
-			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
-
-			const iotjs_jval_t* jobject = &(globalData->jthis_native);
-			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
-			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnWriteable");
-
-			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
-
-			printf("Invoking CallBack To JS callWriteableSync\n");
-			//iotjs_jhelper_call_ok(&cb, &jobject1, jarg);
-			iotjs_make_callback(&cb, &jobject1, jarg);
-
-			iotjs_jval_destroy(&jobject1);
-			iotjs_jval_destroy(&cb);
+	iotjs_jval_destroy(&jobject1);
+	iotjs_jval_destroy(&cb);
 }
 
 static void callReadOnWrite(uv_timer_t *timer){
@@ -262,9 +188,7 @@ static void callReadOnWrite(uv_timer_t *timer){
 }
 
 static void async_callReadOnWrite(GlobalData* globalData){
-
 	uv_timer_start(&(globalData->async_readOnWrite), callReadOnWrite, 0, 0);
-
 	printf("In async_callReadOnWrite \n");
 }
 
@@ -272,7 +196,7 @@ static void async_callReadOnWrite(GlobalData* globalData){
 static int socketCallback(void *userp, curl_socket_t curlfd, curlsocktype purpose){
 	GlobalData* globalData = (GlobalData*) userp;
 	if(purpose == CURLSOCKTYPE_IPCXN)
-		callSocket(globalData);
+		javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONSOCKET);
 	return CURL_SOCKOPT_OK;
 }
 
@@ -286,7 +210,7 @@ ReadBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 	//If stream wasnt made writable yet, make it so.
 	if(!globalData->isStreamWritable){
 		globalData->isStreamWritable=true;
-		callWriteableSync(globalData);
+		javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONWRITABLE);
 		printf("Made Stream Writeable!!! \n");
 	}
 
@@ -453,8 +377,8 @@ void check_multi_info(GlobalData* globalData) {
 							&done_url);
 			printf("%s DONE\n", done_url);
 			uv_timer_stop(&(globalData->socket_timeout));
-			callMessageEnd(globalData);
-			callClose(globalData);
+			javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONEND);
+			javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONCLOSED);
 			curl_multi_remove_handle(globalData->curl_handle, message->easy_handle);
 			curl_easy_cleanup(message->easy_handle);
 			globalData->curl_easy_handle = NULL;
@@ -522,7 +446,7 @@ static void socket_timeout(uv_timer_t *timer){
 			printf("Got inside first if \n \n");
 			if( totalTime_ms > ((uint64_t)globalData->timeout_ms + globalData->lastTime) ){
 				//TODO: Handle the case when request is already over
-				callTimeout(globalData);
+				javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONTIMEOUT);
 				uv_timer_stop(&(globalData->socket_timeout));
 			}
 		}
