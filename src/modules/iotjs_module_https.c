@@ -15,7 +15,6 @@
 
 #include "iotjs_module_https.h"
 #include "iotjs_def.h"
-#include "iotjs_objectwrap.h"
 #include <curl/curl.h>
 #include <uv.h>
 #include <stdio.h>
@@ -37,11 +36,6 @@ typedef struct curl_context_t {
 	struct GlobalData* globalData;
 } curl_context_t;
 
-typedef struct {
-	iotjs_jobjectwrap_t jobjectwrap;
-	struct GlobalData* globalData;
-} IOTJS_VALIDATED_STRUCT(iotjs_https_jobjectwrap_t);
-
 typedef struct read_data_t{
 	iotjs_jval_t chunk;
 	iotjs_jval_t callback;
@@ -51,8 +45,7 @@ typedef struct read_data_t{
 
 typedef struct GlobalData {
 	uv_timer_t timeout;
-	const iotjs_jval_t* jthis;
-	iotjs_https_jobjectwrap_t* jobject_wrap;
+	iotjs_jval_t jthis_native;
 	uv_loop_t *loop;
 	CURLM *curl_handle;
 	CURL *curl_easy_handle;
@@ -90,46 +83,14 @@ typedef struct GlobalData {
 
 } GlobalData;
 
-
-// ------------ Jobjectwrap Stuff. Dunno Why. :-/ ------------
-static void iotjs_https_jobjectwrap_destroy(iotjs_https_jobjectwrap_t* https_jobjectwrap) {
-	printf ("Cleaning up jobjectwrap ERWE SDGFHFDHGSDAFASFDSHDFHFGTESRAWRAW \n");
-	IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_jobjectwrap_t, https_jobjectwrap);
-	iotjs_jobjectwrap_destroy(&_this->jobjectwrap);
-	IOTJS_RELEASE(https_jobjectwrap);
-	printf ("Cleaning up jobjectwrap Done \n");
+static void https_tempjval_destroy(void* nativep){
+ GlobalData* globalData = (GlobalData*) nativep;
+ printf("Address contained in the pointer is - %p", globalData);
+ printf("FREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE \n");
 }
 
-IOTJS_DEFINE_NATIVE_HANDLE_INFO(https_jobjectwrap);
 
-iotjs_https_jobjectwrap_t* iotjs_https_jobjectwrap_create(const iotjs_jval_t* jthis, GlobalData* globalData){
-	iotjs_https_jobjectwrap_t* https_jobjectwrap = IOTJS_ALLOC(iotjs_https_jobjectwrap_t);
-	IOTJS_VALIDATED_STRUCT_CONSTRUCTOR(iotjs_https_jobjectwrap_t, https_jobjectwrap);
-
-	iotjs_jval_t jobjectref = iotjs_jval_create_copied(jthis);
-	iotjs_jobjectwrap_initialize(&_this->jobjectwrap, &jobjectref, &https_jobjectwrap_native_info);
-	_this->globalData = globalData;
-	return https_jobjectwrap;
-}
-
-iotjs_jval_t* iotjs_https_jobject_from_jobjectwrap(iotjs_https_jobjectwrap_t* https_jobjectwrap) {
-	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_jobjectwrap_t, https_jobjectwrap);
-	iotjs_jval_t* jthis = iotjs_jobjectwrap_jobject(&_this->jobjectwrap);
-	IOTJS_ASSERT(iotjs_jval_is_object(jthis));
-	return jthis;
-}
-
-iotjs_https_jobjectwrap_t* iotjs_https_jobjectwrap_from_jobject(iotjs_jval_t* jthis) {
-	iotjs_jobjectwrap_t* jobjectwrap = iotjs_jobjectwrap_from_jobject(jthis);
-	printf("The address of jobject_Wrap while retrieving is %p \n", jobjectwrap);
-	return (iotjs_https_jobjectwrap_t*) jobjectwrap;
-}
-
-GlobalData* iotjs_https_GlobalData_from_jobject(iotjs_jval_t* jthis) {
-	iotjs_https_jobjectwrap_t* https_jobjectwrap = iotjs_https_jobjectwrap_from_jobject(jthis);
-	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_jobjectwrap_t, https_jobjectwrap);
-	return _this->globalData;
-}
+static const jerry_object_native_info_t temp_native_info = { .free_cb = (jerry_object_native_free_callback_t) https_tempjval_destroy } ;
 
 // ------------Curl Context------------
 static curl_context_t* create_curl_context(curl_socket_t sockfd, GlobalData* globalData)
@@ -165,17 +126,14 @@ void destroy_GlobalData(GlobalData* globalData){
 	uv_close((uv_handle_t*)&(globalData->async_readOnWrite), NULL);
 	printf("Leaving check_multi_info Call 2 \n");
 
-	if(globalData->jobject_wrap != NULL){
-		iotjs_jval_destroy (iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap));
-		//iotjs_https_jobjectwrap_destroy(globalData->jobject_wrap);
-		globalData->jobject_wrap = NULL;
-	}
-
 	if(globalData->context != NULL){
 		destroy_curl_context(globalData->context);
 		globalData->context = NULL;
 	}
 	curl_slist_free_all(globalData->headerList);
+
+	iotjs_jval_destroy (&globalData->jthis_native);
+	//globalData->jthis_native = &iotjs_jval_get_null();
 
 	free( globalData);
 	return;
@@ -184,18 +142,17 @@ void destroy_GlobalData(GlobalData* globalData){
 // ------------Actual Functions ----------
 
 static void callMessageEnd(GlobalData* globalData){
-	if(!globalData->jobject_wrap)
+	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
-			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
+			const iotjs_jval_t* jobject = &(globalData->jthis_native);
 			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
 			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnEnd");
 
 			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
 
 			printf("Invoking CallBack To JS callMessageEnd\n");
-			//iotjs_jhelper_call_ok(&cb, &jobject1, &jarg);
 			iotjs_make_callback(&cb, &jobject1, jarg);
 
 			iotjs_jval_destroy(&jobject1);
@@ -203,18 +160,17 @@ static void callMessageEnd(GlobalData* globalData){
 }
 
 static void callClose(GlobalData* globalData){
-	if(!globalData->jobject_wrap)
+	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
-			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
+			const iotjs_jval_t* jobject = &(globalData->jthis_native);
 			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
 			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnClose");
 
 			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
 
 			printf("Invoking CallBack To JS callClose\n");
-			//iotjs_jhelper_call_ok(&cb, &jobject1, &jarg);
 			iotjs_make_callback(&cb, &jobject1, jarg);
 
 			iotjs_jval_destroy(&jobject1);
@@ -222,18 +178,17 @@ static void callClose(GlobalData* globalData){
 }
 
 static void callTimeout(GlobalData* globalData){
-	if(!globalData->jobject_wrap)
+	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
-			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
+			const iotjs_jval_t* jobject = &(globalData->jthis_native);
 			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
 			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnTimeout");
 
 			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
 
 			printf("Invoking CallBack To JS callTimeout\n");
-			//iotjs_jhelper_call_ok(&cb, &jobject1, &jarg);
 			iotjs_make_callback(&cb, &jobject1, jarg);
 
 			iotjs_jval_destroy(&jobject1);
@@ -241,18 +196,17 @@ static void callTimeout(GlobalData* globalData){
 }
 
 static void callSocket(GlobalData* globalData){
-	if(!globalData->jobject_wrap)
+	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
-			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
+			const iotjs_jval_t* jobject = &(globalData->jthis_native);
 			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
 			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnSocket");
 
 			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
 
 			printf("Invoking CallBack To JS callSocket\n");
-			//iotjs_jhelper_call_ok(&cb, &jobject1, &jarg);
 			iotjs_make_callback(&cb, &jobject1, jarg);
 
 			iotjs_jval_destroy(&jobject1);
@@ -260,19 +214,19 @@ static void callSocket(GlobalData* globalData){
 }
 
 static void callWriteableSync(GlobalData* globalData){
-	if(!globalData->jobject_wrap)
+	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
 
-			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
+			const iotjs_jval_t* jobject = &(globalData->jthis_native);
 			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
 			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnWriteable");
 
 			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
 
 			printf("Invoking CallBack To JS callWriteableSync\n");
-			iotjs_jhelper_call_ok(&cb, &jobject1, jarg);
-			//iotjs_make_callback(&cb, &jobject1, jarg);
+			//iotjs_jhelper_call_ok(&cb, &jobject1, jarg);
+			iotjs_make_callback(&cb, &jobject1, jarg);
 
 			iotjs_jval_destroy(&jobject1);
 			iotjs_jval_destroy(&cb);
@@ -282,10 +236,10 @@ static void callReadOnWrite(uv_timer_t *timer){
 	GlobalData* globalData = (GlobalData*) (timer->data);
 	uv_timer_stop(&(globalData->async_readOnWrite));
 	printf("Entered callReadOnWrite\n");
-	if(!globalData->jobject_wrap)
+	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return;
 			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
-			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
+			const iotjs_jval_t* jobject = &(globalData->jthis_native);
 
 			if(iotjs_jval_is_undefined(&(globalData->readOnWrite)))
 				printf("Is undefined \n");
@@ -400,7 +354,7 @@ WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 	}
 
 	//TODO: Separate this out in a different function
-	if(!globalData->jobject_wrap)
+	if( iotjs_jval_is_null( &globalData->jthis_native ))
 		return 0;
 			iotjs_jargs_t jarg = iotjs_jargs_create(1);
 			iotjs_jval_t jResultArr = iotjs_jval_create_byte_array(realsize, contents);
@@ -409,14 +363,13 @@ WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 			//TODO: Use the jResultArr Byte Array in production, but in testing use string.
 			//iotjs_jargs_append_jval(&jarg, &jResultArr);
 
-			const iotjs_jval_t* jobject = iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap);
+			const iotjs_jval_t* jobject = &(globalData->jthis_native);
 			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
 			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnBody");
 
 			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
 
 			printf("Invoking CallBack To JS WriteBodyCallback\n");
-			//iotjs_jhelper_call_ok(&cb, &jobject1, &jarg);
 			iotjs_make_callback(&cb, &jobject1, &jarg);
 
 			iotjs_jval_destroy(&jobject1);
@@ -657,7 +610,7 @@ int handle_socket(CURL *easy, curl_socket_t s, int action, void *userp, void *so
 	return 0;
 }
 
-void doAll(const char* URL,	const char* method, const char* ca, const char* cert, const char* key, const iotjs_jval_t* jthis, const iotjs_jval_t* jcallback ){
+void doAll(const char* URL,	const char* method, const char* ca, const char* cert, const char* key, const iotjs_jval_t* jthis){
 	//loop = malloc(sizeof(uv_loop_t));
 		//uv_loop_init(loop);
 
@@ -667,19 +620,15 @@ void doAll(const char* URL,	const char* method, const char* ca, const char* cert
 	}
 
 	GlobalData* globalData = (GlobalData*)malloc(sizeof(GlobalData));
+	printf("The Address of globalData is %p \n", globalData);
 	if(NULL == globalData)	{
 		printf("\n No more memory to great structures. Failure. \n");
 		return;
 	}
 
 	globalData->loop = iotjs_environment_loop(iotjs_environment_get());
-
-	globalData->jobject_wrap = iotjs_https_jobjectwrap_create(jthis, globalData);
-	printf("The address of jobject_Wrap is %p \n", globalData->jobject_wrap);
-
-	IOTJS_ASSERT(iotjs_jval_is_object(iotjs_https_jobject_from_jobjectwrap(globalData->jobject_wrap)));
-	IOTJS_ASSERT(iotjs_jval_get_object_native_handle(jthis) != 0);
-	//globalData->jthis=jthis;
+	globalData->jthis_native=iotjs_jval_create_copied(jthis);
+	iotjs_jval_set_object_native_handle(& (globalData->jthis_native), (uintptr_t) globalData, &temp_native_info);
 	globalData->headerList = NULL;
 
 	globalData->curl_handle = curl_multi_init();
@@ -755,10 +704,9 @@ void doAll(const char* URL,	const char* method, const char* ca, const char* cert
 
 JHANDLER_FUNCTION(createRequest) {
 	JHANDLER_CHECK_THIS(object);
-	JHANDLER_CHECK_ARGS(2, object, function);
+	JHANDLER_CHECK_ARGS(1, object);
 
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
-	const iotjs_jval_t* jcallback = JHANDLER_GET_ARG(1, function);
 
 	iotjs_jval_t jhost = iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING_HOST);
 	iotjs_string_t host = iotjs_jval_as_string(&jhost);
@@ -785,7 +733,7 @@ JHANDLER_FUNCTION(createRequest) {
 	iotjs_jval_destroy(&jkey);
 	printf("Got key in Native Code as %s \n", iotjs_string_data(&key));
 
-	doAll(iotjs_string_data(&host), iotjs_string_data(&method), iotjs_string_data(&ca), iotjs_string_data(&cert), iotjs_string_data(&key), jthis, jcallback);
+	doAll(iotjs_string_data(&host), iotjs_string_data(&method), iotjs_string_data(&ca), iotjs_string_data(&cert), iotjs_string_data(&key), jthis);
 
 	iotjs_string_destroy(&host);
 	iotjs_string_destroy(&method);
@@ -806,7 +754,7 @@ JHANDLER_FUNCTION(addHeader) {
 
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(1, object);
 
-	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
+	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
 
 	globalData->headerList = curl_slist_append(globalData->headerList, charHeader);
 	if (globalData->method == HTTPS_POST || globalData->method == HTTPS_PUT){
@@ -828,7 +776,7 @@ JHANDLER_FUNCTION(sendRequest) {
 	JHANDLER_CHECK_ARG(0, object);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
 
-	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
+	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
 
 	//Add all the headers to the easy handle
 	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_HTTPHEADER, globalData->headerList);
@@ -855,7 +803,7 @@ JHANDLER_FUNCTION(setTimeout) {
 	printf("Got timeout time in Native Code as %f \n", ms);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(1, object);
 
-	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
+	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
 	//printf(" ------ Can Retrieve the tempvar in NativeCode as ----- %d \n", globalData->tempvar);
 	set_timeout( (long) ms, globalData);
 
@@ -872,7 +820,7 @@ JHANDLER_FUNCTION(_write) {
 	JHANDLER_CHECK_ARG(3, function);
 
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
-	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
+	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
 
 	globalData->readChunk = JHANDLER_GET_ARG(1, string);
 	printf("Got Data in _write as %s \n", iotjs_string_data(&(globalData->readChunk)));
@@ -921,7 +869,7 @@ JHANDLER_FUNCTION(finishRequest) {
 	printf("1 \n");
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
 	printf("2 \n");
-	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
+	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
 	printf("3 \n");
 	globalData->streamEnded=true;
 
@@ -947,7 +895,7 @@ JHANDLER_FUNCTION(Abort) {
 	JHANDLER_CHECK_ARG(0, object);
 
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
-	GlobalData* globalData = iotjs_https_GlobalData_from_jobject((iotjs_jval_t*) jthis);
+	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
 
 	uv_timer_stop(&(globalData->socket_timeout));
 	curl_multi_remove_handle(globalData->curl_handle, globalData->curl_easy_handle);

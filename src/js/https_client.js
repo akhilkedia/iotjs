@@ -50,7 +50,7 @@ function ClientRequest(options, cb) {
 	this.once('finish', this.onFinish);
 
 	console.log('ClientRequest creating request.');
-	httpsNative.createRequest(this, this.response);
+	httpsNative.createRequest(this);
 
 	if(options.auth){
 		var headerString = 'Authorization: Basic '+toBase64(options.auth);
@@ -80,9 +80,6 @@ ClientRequest.prototype._write = function(chunk, callback, onwrite) {
 	httpsNative._write(this, chunk.toString(), callback, onwrite);
 }
 
-//TODO: This function is useless, delete after cleaning up the req_wrap stuff
-ClientRequest.prototype.response = function(){
-}
 
 ClientRequest.prototype.headersComplete= function(){
 	var self = this;
@@ -95,6 +92,7 @@ ClientRequest.prototype.headersComplete= function(){
 	var isHeadResponse = (self.method == 'HEAD');
 	return isHeadResponse;
 }
+
 
 ClientRequest.prototype.onError = function (ret){
 		this.emit('error', ret);
@@ -110,9 +108,11 @@ ClientRequest.prototype.onFinish = function (){
 		this._callbackhack=null;
 }
 
+
 ClientRequest.prototype.setTimeout = function (ms, cb){
 	this.incoming.setTimeout(ms, cb);
 }
+
 
 ClientRequest.prototype.abort = function (doNotEmit){
 	if(!this.aborted){
@@ -156,6 +156,7 @@ function _utf8_encode(string) {
 
     return utftext;
 }
+
 
 function toBase64(input) {
 	console.log("in encode");
