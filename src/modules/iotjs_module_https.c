@@ -30,31 +30,26 @@
 struct GlobalData;
 static void set_timeout(long ms, struct GlobalData* globalData);
 
-typedef struct curl_context_t {
-	uv_poll_t poll_handle;
-	curl_socket_t sockfd;
-	struct GlobalData* globalData;
-} curl_context_t;
-
-typedef struct read_data_t{
-	iotjs_jval_t chunk;
-	iotjs_jval_t callback;
-	iotjs_jval_t onwrite;
-	struct GlobalData* globalData;
-} read_data_t;
-
 typedef struct GlobalData {
+	//Original Request Details
+	const char* URL;
+	HTTPS_Methods method;
+	struct curl_slist *headerList;
+	//TLS certs Options
+	const char* ca;
+	const char* cert;
+	const char* key;
+
+	//Handles
 	uv_timer_t timeout;
 	iotjs_jval_t jthis_native;
 	uv_loop_t *loop;
 	CURLM *curl_handle;
 	CURL *curl_easy_handle;
-	curl_context_t* context;
-	const char* URL;
-	HTTPS_Methods method;
-	struct curl_slist *headerList;
-
-	bool headersDone;
+	//Curl Context
+	uv_poll_t poll_handle;
+	curl_socket_t sockfd;
+	bool poll_handle_destroyed;
 
 	//For SetTimeOut
 	uv_timer_t socket_timeout;
@@ -75,47 +70,14 @@ typedef struct GlobalData {
 
 	//Content-Length for Post and Put
 	long contentLength;
-
-	//TLS certs Options
-	const char* ca;
-	const char* cert;
-	const char* key;
-
 } GlobalData;
 
-static void https_tempjval_destroy(void* nativep){
- GlobalData* globalData = (GlobalData*) nativep;
- printf("Address contained in the pointer is - %p", globalData);
- printf("FREEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEEE \n");
+static void https_jthis_native_destroy(void* nativep){
+	//GlobalData* globalData = (GlobalData*) nativep;
+	printf("destroyed native jthis\n");
 }
 
-
-static const jerry_object_native_info_t temp_native_info = { .free_cb = (jerry_object_native_free_callback_t) https_tempjval_destroy } ;
-
-// ------------Curl Context------------
-static curl_context_t* create_curl_context(curl_socket_t sockfd, GlobalData* globalData)
-{
-	curl_context_t *context;
-	context = (curl_context_t *) malloc(sizeof *context);
-	context->sockfd = sockfd;
-	context->globalData = globalData;
-
-	uv_poll_init_socket(globalData->loop, &context->poll_handle, sockfd);
-	context->poll_handle.data = context;
-
-	return context;
-}
-
-static void curl_close_cb(uv_handle_t *handle)
-{
-	curl_context_t *context = (curl_context_t *) handle->data;
-	free(context);
-}
-
-static void destroy_curl_context(curl_context_t *context)
-{
-	uv_close((uv_handle_t *) &context->poll_handle, curl_close_cb);
-}
+static const jerry_object_native_info_t temp_native_info = { .free_cb = (jerry_object_native_free_callback_t) https_jthis_native_destroy } ;
 
 void destroy_GlobalData(GlobalData* globalData){
 	printf("Destroying GlobalData \n");
@@ -126,9 +88,10 @@ void destroy_GlobalData(GlobalData* globalData){
 	uv_close((uv_handle_t*)&(globalData->async_readOnWrite), NULL);
 	printf("Leaving check_multi_info Call 2 \n");
 
-	if(globalData->context != NULL){
-		destroy_curl_context(globalData->context);
-		globalData->context = NULL;
+	if(! globalData->poll_handle_destroyed){
+		uv_poll_stop(&globalData->poll_handle);
+		uv_close((uv_handle_t *) &globalData->poll_handle, NULL);
+		globalData->poll_handle_destroyed = true;
 	}
 	curl_slist_free_all(globalData->headerList);
 
@@ -201,8 +164,7 @@ static int socketCallback(void *userp, curl_socket_t curlfd, curlsocktype purpos
 }
 
 static size_t
-ReadBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
-{
+ReadBodyCallback(void *contents, size_t size, size_t nmemb, void *userp){
 	//printf("Entered ReadBodyCallback \n");
 	GlobalData* globalData = (GlobalData*) userp;
 	printf("Entered ReadBodyCallback %zu \n", globalData->curReadIndex);
@@ -255,8 +217,7 @@ ReadBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 }
 
 static size_t
-WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
-{
+WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp){
 	GlobalData* globalData = (GlobalData*) userp;
 	size_t realsize = size * nmemb;
 	printf("Entered WriteMemoryCallback \n");
@@ -270,11 +231,6 @@ WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 		globalData->toDestroyReadOnWrite = false;
 		iotjs_jval_destroy(&(globalData->readOnWrite));
 		iotjs_jval_destroy(&(globalData->readCallback));
-	}
-
-	if(!globalData->headersDone){
-		globalData->headersDone = true;
-		//callResponse(globalData);
 	}
 
 	//TODO: Separate this out in a different function
@@ -307,7 +263,6 @@ WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp)
 }
 
 void add_download(GlobalData* globalData) {
-
 	globalData->curl_easy_handle = curl_easy_init();
 
 	/* send all data to this function	*/
@@ -331,13 +286,17 @@ void add_download(GlobalData* globalData) {
 	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_SOCKOPTDATA, (void *)globalData);
 
 	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_URL, globalData->URL);
+	globalData->URL = NULL;
 
 	if(strlen(globalData->ca) > 0)
 		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_CAINFO, globalData->ca);
+	globalData->ca = NULL;
 	if(strlen(globalData->cert) > 0)
 		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_SSLCERT, globalData->cert);
+	globalData->cert = NULL;
 	if(strlen(globalData->key) > 0)
 		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_SSLKEY, globalData->key);
+	globalData->key = NULL;
 
 	//Various request types
 	if(globalData->method == HTTPS_GET)
@@ -393,9 +352,7 @@ void check_multi_info(GlobalData* globalData) {
 }
 
 void curl_perform(uv_poll_t *poll, int status, int events) {
-	curl_context_t *context = (curl_context_t*) poll->data ;
-	GlobalData* globalData = context->globalData;
-
+	GlobalData* globalData = (GlobalData*) poll->data ;
 	printf("Entered in curl_perform \n");
 
 	//TODO: Do we need this?
@@ -407,7 +364,7 @@ void curl_perform(uv_poll_t *poll, int status, int events) {
 	if (!status && events & UV_READABLE) flags |= CURL_CSELECT_IN;
 	if (!status && events & UV_WRITABLE) flags |= CURL_CSELECT_OUT;
 
-	curl_multi_socket_action(globalData->curl_handle, context->sockfd, flags, &running_handles);
+	curl_multi_socket_action(globalData->curl_handle, globalData->sockfd, flags, &running_handles);
 	check_multi_info(globalData);
 	printf("Leaving curl_perform Call \n");
 }
@@ -421,6 +378,7 @@ static void on_timeout(uv_timer_t *timer) {
 	check_multi_info(globalData);
 	printf("In on timeout \n");
 }
+
 static void socket_timeout(uv_timer_t *timer){
 	//TODO: do I need to unref/close the timeout handle?
 	GlobalData* globalData = (GlobalData*) (timer->data);
@@ -457,6 +415,7 @@ static void socket_timeout(uv_timer_t *timer){
 	}
 }
 
+
 static void set_timeout(long ms, GlobalData* globalData) {
 //TODO: do I need to unref/close the timeout handle?
 	if(ms < 0)
@@ -486,45 +445,43 @@ printf("Setting a uv_timer %ld \n", timeout_ms);
 }
 
 
-int handle_socket(CURL *easy, curl_socket_t s, int action, void *userp, void *socketp) {
+int handle_socket(CURL *easy, curl_socket_t sockfd, int action, void *userp, void *socketp) {
 	printf("in HandleSocket \n");
 	GlobalData* globalData = (GlobalData*) userp;
 	//if(globalData->isStreamWritable){
 	//	printf("Unpaused in handle_socket \n");
 	//	curl_easy_pause(globalData->curl_easy_handle, CURLPAUSE_CONT);
 	//}
-	curl_context_t *curl_context = NULL;
 	if (action == CURL_POLL_IN || action == CURL_POLL_OUT|| action == CURL_POLL_INOUT) {
-		if (socketp) {
-			curl_context = (curl_context_t*) socketp;
-		}
-		else {
-			curl_context = create_curl_context(s, globalData);
-			curl_multi_assign(globalData->curl_handle, s, (void *) curl_context);
+		if (!socketp) {
+			globalData->sockfd = sockfd;
+			uv_poll_init_socket(globalData->loop, &globalData->poll_handle, sockfd);
+			(&globalData->poll_handle)->data = globalData;
+			curl_multi_assign(globalData->curl_handle, sockfd, (void *) globalData);
 		}
 	}
 
 	switch (action) {
 		case CURL_POLL_IN:
-			uv_poll_start(&curl_context->poll_handle, UV_READABLE, curl_perform);
+			uv_poll_start(&globalData->poll_handle, UV_READABLE, curl_perform);
 			printf("in in HandleSocket \n");
 			break;
 		case CURL_POLL_OUT:
-			uv_poll_start(&curl_context->poll_handle, UV_WRITABLE, curl_perform);
+			uv_poll_start(&globalData->poll_handle, UV_WRITABLE, curl_perform);
 			printf("in out HandleSocket \n");
 			break;
 		case CURL_POLL_INOUT:
-			uv_poll_start(&curl_context->poll_handle, UV_READABLE|UV_WRITABLE, curl_perform);
+			uv_poll_start(&globalData->poll_handle, UV_READABLE|UV_WRITABLE, curl_perform);
 			printf("in inout HandleSocket \n");
 			break;
 		case CURL_POLL_REMOVE:
 			printf("in remove HandleSocket \n");
 			if (socketp) {
 				printf("Leaving handle_socket POLL_REMOVE \n");
-				uv_poll_stop(&((curl_context_t*)socketp)->poll_handle);
-				destroy_curl_context((curl_context_t*) socketp);
-				globalData->context = NULL;
-				curl_multi_assign(globalData->curl_handle, s, NULL);
+				uv_poll_stop(&globalData->poll_handle);
+				uv_close((uv_handle_t *) &globalData->poll_handle, NULL);
+				globalData->poll_handle_destroyed = true;
+				curl_multi_assign(globalData->curl_handle, sockfd, NULL);
 			}
 			break;
 		default:
@@ -560,7 +517,6 @@ void doAll(const char* URL,	const char* method, const char* ca, const char* cert
 	uv_timer_init(globalData->loop, &(globalData->timeout));
 
 	printf("Saving URL in globalData \n");
-	//TODO: copy URL if need be. It'll be destroyed.
 	globalData->URL=URL;
 
 	if(strcmp(method,"GET") == 0)
@@ -583,6 +539,8 @@ void doAll(const char* URL,	const char* method, const char* ca, const char* cert
 		printf("Request method is not valid. Valid options are GET, POST, PUT, DELETE, HEAD");
 		//TODO: cleanup and gracefully exit.
 	}
+
+	globalData->poll_handle_destroyed = false;
 
 	//Timeout stuff
 	globalData->timeout_ms=-1;
