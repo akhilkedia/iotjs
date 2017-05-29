@@ -123,6 +123,17 @@ void iotjs_https_destroy(iotjs_https_t* https_data) {
   }
   curl_slist_free_all(_this->header_list);
 
+  if (_this->data_to_read) {
+    _this->data_to_read = false;
+    printf("about to destroy read_chunk \n");
+    iotjs_string_destroy(&(_this->read_chunk));
+  }
+  if (_this->to_destroy_read_onwrite) {
+    _this->to_destroy_read_onwrite = false;
+    iotjs_jval_destroy(&(_this->read_onwrite));
+    iotjs_jval_destroy(&(_this->read_callback));
+  }
+
   iotjs_jval_destroy(&_this->jthis_native);
   // IOTJS_RELEASE(https_data);
   return;
@@ -235,6 +246,7 @@ size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
     // Finished sending one chunk of data
     _this->cur_read_index = 0;
     _this->data_to_read = false;
+     printf("about to destroy read_chunk \n");
     iotjs_string_destroy(&(_this->read_chunk));
     // TODO: call onWrite and callback
     iotjs_https_call_read_onwrite_async(https_data);
@@ -245,6 +257,13 @@ size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
     printf("Pausing Read \n");
     return CURL_READFUNC_PAUSE;
   }
+
+  if (_this->to_destroy_read_onwrite) {
+    _this->to_destroy_read_onwrite = false;
+    iotjs_jval_destroy(&(_this->read_onwrite));
+    iotjs_jval_destroy(&(_this->read_callback));
+  }
+
 
   // All done, end the transfer
   printf("Exiting iotjs_https_curl_read_callback Finally\n\n");
@@ -258,22 +277,11 @@ size_t iotjs_https_curl_write_callback(void* contents, size_t size,
   size_t real_size = size * nmemb;
   printf("Entered iotjs_https_curl_write_callback \n");
 
-  //TODO: Verify that below pretending doesnt break chunked encoding.
-  if (!_this->stream_ended || _this->data_to_read) {
-    //Pretend we Finished sending one chunk of data
-    //_this->cur_read_index = 0;
-    //_this->data_to_read = false;
-    //iotjs_string_destroy(&(_this->read_chunk));
-    //iotjs_https_call_read_onwrite_async(https_data);
-    printf("Pausing Write \n");
-    return CURL_WRITEFUNC_PAUSE;
-  }
-
-  if (_this->to_destroy_read_onwrite) {
-    _this->to_destroy_read_onwrite = false;
-    iotjs_jval_destroy(&(_this->read_onwrite));
-    iotjs_jval_destroy(&(_this->read_callback));
-  }
+  //TODO: Verify that commenting out below doesnt break chunked encoding.
+  //if (!_this->stream_ended || _this->data_to_read) {
+    //printf("Pausing Write \n");
+    //return CURL_WRITEFUNC_PAUSE;
+  //}
 
   printf("Here1 iotjs_https_curl_write_callback\n");
   if (iotjs_jval_is_null(&_this->jthis_native))
@@ -303,6 +311,7 @@ void iotjs_https_check_done(iotjs_https_t* https_data) {
   CURLMsg* message;
   int pending;
   bool error = false;
+  printf("In iotjs_https_check_done \n");
 
   while ((message = curl_multi_info_read(_this->curl_multi_handle, &pending))) {
     switch (message->msg) {
@@ -355,8 +364,9 @@ void iotjs_https_uv_poll_callback(uv_poll_t* poll, int status, int events) {
   if (!status && events & UV_WRITABLE)
     flags |= CURL_CSELECT_OUT;
 
-  curl_multi_socket_action(_this->curl_multi_handle, _this->sockfd, flags,
+  int curlmcode = curl_multi_socket_action(_this->curl_multi_handle, _this->sockfd, flags,
                            &_this->running_handles);
+  printf("The error code is %d \n", curlmcode);
   iotjs_https_check_done(https_data);
   printf("Leaving iotjs_https_uv_poll_callback Call \n");
 }

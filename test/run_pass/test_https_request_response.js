@@ -27,7 +27,7 @@ var options = {
   protocol: 'http:',
   port: 3005,
   path: '/',
-  headers : {'Content-Length': 3*message.length}
+  headers : {'Content-Length': message.length}
 };
 /*
 
