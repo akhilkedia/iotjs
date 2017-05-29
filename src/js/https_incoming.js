@@ -30,6 +30,8 @@ function IncomingMessage(clientRequest) {
   // for response (client)
   this.statusCode = null;
   this.statusMessage = null;
+  this.url = null;
+  this.method = null;
 
   this.parser = createHTTPParser(this);
 

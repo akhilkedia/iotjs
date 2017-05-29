@@ -37,7 +37,9 @@ function ClientRequest(options, cb) {
 
   console.log('About to call IncomingMessage Constructor');
   this._incoming = new incoming.IncomingMessage(this);
-  this.aborted = false;
+  this._incoming.url = this.host;
+  this._incoming.method = this.method;
+  this.aborted = null;
 
   // Register response event handler.
   if (cb) {
@@ -110,7 +112,8 @@ ClientRequest.prototype.setTimeout = function(ms, cb) {
 
 ClientRequest.prototype.abort = function(doNotEmit) {
   if (!this.aborted) {
-    this.aborted = true;
+    var date = new Date();
+    this.aborted = date.getTime();
     httpsNative.abort(this);
 
     if (this.incoming.parser) {
