@@ -17,6 +17,9 @@
 #ifndef IOTJS_MODULE_HTTPS_H_
 #define IOTJS_MODULE_HTTPS_H_
 
+#include "iotjs_def.h"
+#include <curl/curl.h>
+#include <uv.h>
 
 typedef enum {
 	HTTPS_GET = 0,
@@ -28,5 +31,51 @@ typedef enum {
 	HTTPS_OPTIONS,
 	HTTPS_TRACE
 } HTTPS_Methods;
+
+// -----------A Per-Request Struct-----------
+
+typedef struct {
+	//Original Request Details
+	const char* URL;
+	HTTPS_Methods method;
+	struct curl_slist *header_list;
+	//TLS certs Options
+	const char* ca;
+	const char* cert;
+	const char* key;
+	//Content-Length for Post and Put
+	long content_length;
+
+	//Handles
+	uv_loop_t *loop;
+	iotjs_jval_t jthis_native;
+	CURLM *curl_handle;
+	uv_timer_t timeout;
+	CURL *curl_easy_handle;
+	//Curl Context
+	uv_poll_t poll_handle;
+	curl_socket_t sockfd;
+	bool poll_handle_destroyed;
+
+	//For SetTimeOut
+	uv_timer_t socket_timeout;
+	long timeout_ms;
+	double last_bytes_num;
+	uint64_t last_bytes_time;
+
+	//For ReadData
+	size_t cur_read_index;
+	bool is_stream_writable;
+	bool data_to_read;
+	bool stream_ended;
+	bool to_destroy_read_onwrite;
+	iotjs_string_t read_chunk;
+	iotjs_jval_t read_callback;
+	uv_timer_t async_read_onwrite;
+	iotjs_jval_t read_onwrite;
+
+
+} IOTJS_VALIDATED_STRUCT(iotjs_https_t);
+
 
 #endif /* IOTJS_MODULE_HTTPS_H_ */

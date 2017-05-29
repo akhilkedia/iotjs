@@ -14,9 +14,6 @@
  */
 
 #include "iotjs_module_https.h"
-#include "iotjs_def.h"
-#include <curl/curl.h>
-#include <uv.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -25,338 +22,302 @@
 #include <inttypes.h>
 #include <stdlib.h>
 
-
-// -----------Some Global Structs-----------
-struct GlobalData;
-static void set_timeout(long ms, struct GlobalData* globalData);
-
-typedef struct GlobalData {
-	//Original Request Details
-	const char* URL;
-	HTTPS_Methods method;
-	struct curl_slist *headerList;
-	//TLS certs Options
-	const char* ca;
-	const char* cert;
-	const char* key;
-
-	//Handles
-	uv_timer_t timeout;
-	iotjs_jval_t jthis_native;
-	uv_loop_t *loop;
-	CURLM *curl_handle;
-	CURL *curl_easy_handle;
-	//Curl Context
-	uv_poll_t poll_handle;
-	curl_socket_t sockfd;
-	bool poll_handle_destroyed;
-
-	//For SetTimeOut
-	uv_timer_t socket_timeout;
-	long timeout_ms;
-	double lastNumBytes;
-	uint64_t lastTime;
-
-	//For ReadData
-	bool isStreamWritable;
-	bool dataToRead;
-	bool streamEnded;
-	iotjs_string_t readChunk;
-	iotjs_jval_t readCallback;
-	uv_timer_t async_readOnWrite;
-	iotjs_jval_t readOnWrite;
-	bool toDestroyReadOnWrite;
-	size_t curReadIndex;
-
-	//Content-Length for Post and Put
-	long contentLength;
-} GlobalData;
-
+/*
 static void https_jthis_native_destroy(void* nativep){
-	//GlobalData* globalData = (GlobalData*) nativep;
+	iotjs_https_t* https_data = (iotjs_https_t*) nativep;
 	printf("destroyed native jthis\n");
 }
 
 static const jerry_object_native_info_t temp_native_info = { .free_cb = (jerry_object_native_free_callback_t) https_jthis_native_destroy } ;
+*/
+// Constructor
+iotjs_https_t* iotjs_https_create(const char* URL, const char* method, const char* ca, const char* cert, const char* key, const iotjs_jval_t* jthis ){
+	iotjs_https_t* https_data = IOTJS_ALLOC(iotjs_https_t);
+	IOTJS_VALIDATED_STRUCT_CONSTRUCTOR(iotjs_https_t, https_data);
 
-void destroy_GlobalData(GlobalData* globalData){
-	printf("Destroying GlobalData \n");
+	// Original Request Details
+	printf("Saving URL in _this \n");
+	_this->URL=URL;
+	_this->header_list = NULL;
+	if(strcmp(method,"GET") == 0)
+		_this->method=HTTPS_GET;
+	else if(strcmp(method,"POST") == 0)
+		_this->method=HTTPS_POST;
+	else if(strcmp(method,"PUT") == 0)
+		_this->method=HTTPS_PUT;
+	else if(strcmp(method,"DELETE") == 0)
+		_this->method=HTTPS_DELETE;
+	else if(strcmp(method,"HEAD") == 0)
+		_this->method=HTTPS_HEAD;
+	else if(strcmp(method,"CONNECT") == 0)
+		_this->method=HTTPS_CONNECT;
+	else if(strcmp(method,"OPTIONS") == 0)
+		_this->method=HTTPS_OPTIONS;
+	else if(strcmp(method,"TRACE") == 0)
+		_this->method=HTTPS_TRACE;
+	else
+		printf("Request method is not valid. Valid options are GET, POST, PUT, DELETE, HEAD"); //TODO: cleanup and gracefully exit.
 
-	curl_multi_cleanup(globalData->curl_handle);
-	uv_close((uv_handle_t*)&(globalData->timeout), NULL);
-	uv_close((uv_handle_t*)&(globalData->socket_timeout), NULL);
-	uv_close((uv_handle_t*)&(globalData->async_readOnWrite), NULL);
-	printf("Leaving check_multi_info Call 2 \n");
+	//TLS certs stuff
+	_this->ca = ca;
+	_this->cert = cert;
+	_this->key = key;
+	//Content Length stuff
+	_this->content_length = -1;
 
-	if(! globalData->poll_handle_destroyed){
-		uv_poll_stop(&globalData->poll_handle);
-		uv_close((uv_handle_t *) &globalData->poll_handle, NULL);
-		globalData->poll_handle_destroyed = true;
+	//Handles
+	_this->loop = iotjs_environment_loop(iotjs_environment_get());
+	_this->jthis_native=iotjs_jval_create_copied(jthis);
+	iotjs_jval_set_object_native_handle(& (_this->jthis_native), (uintptr_t) _this, NULL);
+	_this->curl_handle = curl_multi_init();
+	_this->curl_easy_handle = curl_easy_init();
+	_this->timeout.data = (void*) https_data;
+	uv_timer_init(_this->loop, &(_this->timeout));
+	_this->poll_handle_destroyed = false;
+
+	//Timeout stuff
+	_this->timeout_ms=-1;
+	_this->last_bytes_num=-1;
+	_this->last_bytes_time=0;
+	_this->socket_timeout.data = (void*) https_data;
+	uv_timer_init(_this->loop, &(_this->socket_timeout));
+
+	//ReadData stuff
+	_this->cur_read_index=0;
+	_this->is_stream_writable=false;
+	_this->stream_ended=false;
+	_this->data_to_read=false;
+	_this->to_destroy_read_onwrite = false;
+	_this->async_read_onwrite.data = (void*) https_data;
+	uv_timer_init(_this->loop, &(_this->async_read_onwrite));
+	//No Need to read data for following types of requests
+	if(_this->method == HTTPS_GET ||
+		_this->method == HTTPS_DELETE ||
+		_this->method == HTTPS_HEAD ||
+		_this->method == HTTPS_OPTIONS ||
+		_this->method == HTTPS_TRACE)
+			_this->stream_ended=true;
+
+
+	return https_data;
+}
+
+// Destructor
+void iotjs_https_destroy(iotjs_https_t* https_data){
+	printf("Destroying iotjs_https_t \n");
+	IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
+
+	curl_multi_cleanup(_this->curl_handle);
+	uv_close((uv_handle_t*)&(_this->timeout), NULL);
+	uv_close((uv_handle_t*)&(_this->socket_timeout), NULL);
+	uv_close((uv_handle_t*)&(_this->async_read_onwrite), NULL);
+
+	if(! _this->poll_handle_destroyed){
+		uv_poll_stop(&_this->poll_handle);
+		uv_close((uv_handle_t *) &_this->poll_handle, NULL);
+		_this->poll_handle_destroyed = true;
 	}
-	curl_slist_free_all(globalData->headerList);
+	curl_slist_free_all(_this->header_list);
 
-	iotjs_jval_destroy (&globalData->jthis_native);
-	//globalData->jthis_native = &iotjs_jval_get_null();
-
-	free( globalData);
+	iotjs_jval_destroy(&_this->jthis_native);
+	IOTJS_RELEASE(https_data);
 	return;
 }
 
-// ------------Actual Functions ----------
+iotjs_jval_t* iotjs_https_jthis_from_https(iotjs_https_t* https_data){
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	return &(_this->jthis_native);
+}
 
-static void javascriptCallback(GlobalData* globalData, const char* property){
-	if( iotjs_jval_is_null( &globalData->jthis_native ))
+// ------------Actual Functions ----------
+// Call any property of ClientRequest._Incoming
+void iotjs_https_jcallback(iotjs_https_t* https_data, const char* property, const iotjs_jargs_t* jarg){
+	iotjs_jval_t* jthis = iotjs_https_jthis_from_https(https_data);
+	if( iotjs_jval_is_null(jthis))
 		return;
 
-	const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
-	const iotjs_jval_t* jobject = &(globalData->jthis_native);
-	iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, IOTJS_MAGIC_STRING__INCOMING);
-	iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, property);
+	iotjs_jval_t jincoming = iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING__INCOMING);
+	iotjs_jval_t cb = iotjs_jval_get_property(&jincoming, property);
 
 	IOTJS_ASSERT(iotjs_jval_is_function(&cb));
 	printf("Invoking CallBack To JS %s\n", property);
-	iotjs_make_callback(&cb, &jobject1, jarg);
+	iotjs_make_callback(&cb, &jincoming, jarg);
 
-	iotjs_jval_destroy(&jobject1);
+	iotjs_jval_destroy(&jincoming);
 	iotjs_jval_destroy(&cb);
 }
 
-static void callReadOnWrite(uv_timer_t *timer){
-	GlobalData* globalData = (GlobalData*) (timer->data);
-	uv_timer_stop(&(globalData->async_readOnWrite));
-	printf("Entered callReadOnWrite\n");
-	if( iotjs_jval_is_null( &globalData->jthis_native ))
+// Call onWrite and callback after ClientRequest._write
+void iotjs_https_call_read_on_write(uv_timer_t *timer){
+	printf("Entered iotjs_https_call_read_on_write\n");
+	iotjs_https_t* https_data = (iotjs_https_t*) (timer->data);
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+
+	uv_timer_stop(&(_this->async_read_onwrite));
+	if (iotjs_jval_is_null(&_this->jthis_native))
 		return;
-			const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
-			const iotjs_jval_t* jobject = &(globalData->jthis_native);
+	const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
+	const iotjs_jval_t* jthis = &(_this->jthis_native);
+	IOTJS_ASSERT(iotjs_jval_is_function(&(_this->read_onwrite)));
 
-			if(iotjs_jval_is_undefined(&(globalData->readOnWrite)))
-				printf("Is undefined \n");
+	printf("Invoking CallBack To JS read_onwrite\n");
+	iotjs_make_callback(&(_this->read_onwrite), jthis, jarg);
 
-			if(iotjs_jval_is_null(&(globalData->readOnWrite)))
-				printf("Is null \n");
-
-			IOTJS_ASSERT(iotjs_jval_is_function(&(globalData->readOnWrite)));
-
-			printf("Invoking CallBack To JS callReadOnWrite\n");
-			//iotjs_jhelper_call_ok(&(globalData->readOnWrite), jobject, jarg);
-			iotjs_make_callback(&(globalData->readOnWrite), jobject, jarg);
-			if(!iotjs_jval_is_undefined(&(globalData->readCallback)))
-				iotjs_make_callback(&(globalData->readCallback), jobject, jarg);
-			//if(globalData->toDestroyReadOnWrite){
-				//iotjs_jval_destroy(&(globalData->readOnWrite));
-				//globalData->toDestroyReadOnWrite = false;
-			//}
-	printf("Exiting callReadOnWrite\n");
+	if (!iotjs_jval_is_undefined(&(_this->read_callback)))
+		iotjs_make_callback(&(_this->read_callback), jthis, jarg);
+	printf("Exiting iotjs_https_call_read_on_write\n");
 }
 
-static void async_callReadOnWrite(GlobalData* globalData){
-	uv_timer_start(&(globalData->async_readOnWrite), callReadOnWrite, 0, 0);
-	printf("In async_callReadOnWrite \n");
+// Call the above method Asynchronously
+void iotjs_https_call_read_on_write_async(iotjs_https_t* https_data){
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	uv_timer_start(&(_this->async_read_onwrite), iotjs_https_call_read_on_write, 0, 0);
+	printf("In iotjs_https_call_read_on_write_async \n");
 }
 
 
-static int socketCallback(void *userp, curl_socket_t curlfd, curlsocktype purpose){
-	GlobalData* globalData = (GlobalData*) userp;
-	if(purpose == CURLSOCKTYPE_IPCXN)
-		javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONSOCKET);
+int iotjs_https_curl_sockopt_callback(void *userp, curl_socket_t curlfd, curlsocktype purpose){
+	iotjs_https_t* https_data = (iotjs_https_t*) userp;
+	//TODO: this if is probably never needed
+	//if(purpose == CURLSOCKTYPE_IPCXN)
+	iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONSOCKET, iotjs_jargs_get_empty());
 	return CURL_SOCKOPT_OK;
 }
 
-static size_t
-ReadBodyCallback(void *contents, size_t size, size_t nmemb, void *userp){
-	//printf("Entered ReadBodyCallback \n");
-	GlobalData* globalData = (GlobalData*) userp;
-	printf("Entered ReadBodyCallback %zu \n", globalData->curReadIndex);
+size_t iotjs_https_curl_read_callback(void *contents, size_t size, size_t nmemb, void *userp){
+	//printf("Entered iotjs_https_curl_read_callback \n");
+	iotjs_https_t* https_data = (iotjs_https_t*) userp;
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	printf("Entered iotjs_https_curl_read_callback %zu \n", _this->cur_read_index);
 
 	//If stream wasnt made writable yet, make it so.
-	if(!globalData->isStreamWritable){
-		globalData->isStreamWritable=true;
-		javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONWRITABLE);
+	if(!_this->is_stream_writable){
+		_this->is_stream_writable=true;
+		iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONWRITABLE, iotjs_jargs_get_empty());
 		printf("Made Stream Writeable!!! \n");
 	}
 
-	if(globalData->dataToRead){
+	if(_this->data_to_read){
 		size_t realsize = size * nmemb;
-		size_t chunkSize = iotjs_string_size(&(globalData->readChunk));
-		size_t leftToCopySize = chunkSize - globalData->curReadIndex;
+		size_t chunkSize = iotjs_string_size(&(_this->read_chunk));
+		size_t leftToCopySize = chunkSize - _this->cur_read_index;
 
 		if(realsize < 1)
 			return 0;
 
 		//send some data
-		if(globalData->curReadIndex < chunkSize){
+		if(_this->cur_read_index < chunkSize){
 			size_t numToCopy = (leftToCopySize < realsize) ? leftToCopySize : realsize;
-			printf("in ReadBodyCallback %zu  \n", globalData->curReadIndex);
-			const char* buf = iotjs_string_data(&(globalData->readChunk));
-			buf = &buf[globalData->curReadIndex];
+			printf("in iotjs_https_curl_read_callback %zu  \n", _this->cur_read_index);
+			const char* buf = iotjs_string_data(&(_this->read_chunk));
+			buf = &buf[_this->cur_read_index];
 			strncpy((char *)contents, buf, numToCopy );
-			globalData->curReadIndex = globalData->curReadIndex+numToCopy;
+			_this->cur_read_index = _this->cur_read_index+numToCopy;
 			printf("***************** Wrote %zu bytes of data ******************\n", numToCopy);
 			return numToCopy;
 		}
 
 		//Finished sending one chunk of data
-		globalData->curReadIndex=0;
-		globalData->dataToRead=false;
-		iotjs_string_destroy(&(globalData->readChunk));
+		_this->cur_read_index=0;
+		_this->data_to_read=false;
+		iotjs_string_destroy(&(_this->read_chunk));
 		//TODO: call onWrite and callback
-		async_callReadOnWrite(globalData);
-
+		iotjs_https_call_read_on_write_async(https_data);
 	}
 
 	//If the data is sent, and stream hasn't ended, wait for more data
-	if(!globalData->streamEnded){
+	if(!_this->stream_ended){
 		printf("Pausing Read \n");
 		return CURL_READFUNC_PAUSE;
 	}
 
 	//All done, end the transfer
-	printf("Exiting ReadBodyCallback Finally\n\n");
+	printf("Exiting iotjs_https_curl_read_callback Finally\n\n");
 	return 0;
 }
 
-static size_t
-WriteBodyCallback(void *contents, size_t size, size_t nmemb, void *userp){
-	GlobalData* globalData = (GlobalData*) userp;
+size_t iotjs_https_curl_write_callback(void *contents, size_t size, size_t nmemb, void *userp){
+	iotjs_https_t* https_data = (iotjs_https_t*) userp;
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
 	size_t realsize = size * nmemb;
 	printf("Entered WriteMemoryCallback \n");
 
-	if(!globalData->streamEnded || globalData->dataToRead){
+	if(!_this->stream_ended || _this->data_to_read){
 		printf("Pausing Write \n");
-		//
 		return CURL_WRITEFUNC_PAUSE;
 	}
-	if(globalData->toDestroyReadOnWrite){
-		globalData->toDestroyReadOnWrite = false;
-		iotjs_jval_destroy(&(globalData->readOnWrite));
-		iotjs_jval_destroy(&(globalData->readCallback));
+
+	if(_this->to_destroy_read_onwrite){
+		_this->to_destroy_read_onwrite = false;
+		iotjs_jval_destroy(&(_this->read_onwrite));
+		iotjs_jval_destroy(&(_this->read_callback));
 	}
 
 	//TODO: Separate this out in a different function
-	if( iotjs_jval_is_null( &globalData->jthis_native ))
+	if( iotjs_jval_is_null( &_this->jthis_native ))
 		return 0;
-			iotjs_jargs_t jarg = iotjs_jargs_create(1);
-			iotjs_jval_t jResultArr = iotjs_jval_create_byte_array(realsize, contents);
-			iotjs_string_t jResultString = iotjs_string_create_with_size(contents, realsize);
-			iotjs_jargs_append_string(&jarg, &jResultString);
-			//TODO: Use the jResultArr Byte Array in production, but in testing use string.
-			//iotjs_jargs_append_jval(&jarg, &jResultArr);
+	iotjs_jargs_t jarg = iotjs_jargs_create(1);
+	iotjs_jval_t jResultArr = iotjs_jval_create_byte_array(realsize, contents);
+	iotjs_string_t jResultString = iotjs_string_create_with_size(contents, realsize);
+	iotjs_jargs_append_string(&jarg, &jResultString);
+	//TODO: Use the jResultArr Byte Array in production, but in testing use string.
+	//iotjs_jargs_append_jval(&jarg, &jResultArr);
 
-			const iotjs_jval_t* jobject = &(globalData->jthis_native);
-			iotjs_jval_t jobject1 =	iotjs_jval_get_property(jobject, "_incoming");
-			iotjs_jval_t cb = iotjs_jval_get_property(&jobject1, "OnBody");
+	iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONBODY, &jarg);
 
-			IOTJS_ASSERT(iotjs_jval_is_function(&cb));
-
-			printf("Invoking CallBack To JS WriteBodyCallback\n");
-			iotjs_make_callback(&cb, &jobject1, &jarg);
-
-			iotjs_jval_destroy(&jobject1);
-			iotjs_jval_destroy(&cb);
-			iotjs_jval_destroy(&jResultArr);
-			iotjs_string_destroy(&jResultString);
-			iotjs_jargs_destroy(&jarg);
+	iotjs_jval_destroy(&jResultArr);
+	iotjs_string_destroy(&jResultString);
+	iotjs_jargs_destroy(&jarg);
 	printf("Exiting WriteMemoryCallback \n\n");
 
 	return realsize;
 }
 
-void add_download(GlobalData* globalData) {
-	globalData->curl_easy_handle = curl_easy_init();
 
-	/* send all data to this function	*/
-	//curl_easy_setopt(handle, CURLOPT_HEADERFUNCTION, WriteHeaderCallback);
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_VERBOSE, 1L);
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_PROXY, "");
-
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_HEADERDATA, (void *)globalData);
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_WRITEFUNCTION, WriteBodyCallback);
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_WRITEDATA, (void *)globalData);
-
-	//Read and send data to server only for some request types
-	if(globalData->method == HTTPS_POST ||
-		globalData->method == HTTPS_PUT ||
-		globalData->method == HTTPS_CONNECT){
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_READFUNCTION, ReadBodyCallback);
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_READDATA, (void *)globalData);
-	}
-
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_SOCKOPTFUNCTION, socketCallback);
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_SOCKOPTDATA, (void *)globalData);
-
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_URL, globalData->URL);
-	globalData->URL = NULL;
-
-	if(strlen(globalData->ca) > 0)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_CAINFO, globalData->ca);
-	globalData->ca = NULL;
-	if(strlen(globalData->cert) > 0)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_SSLCERT, globalData->cert);
-	globalData->cert = NULL;
-	if(strlen(globalData->key) > 0)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_SSLKEY, globalData->key);
-	globalData->key = NULL;
-
-	//Various request types
-	if(globalData->method == HTTPS_GET)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_HTTPGET, 1L);
-	else if(globalData->method == HTTPS_POST)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_POST, 1L);
-	else if(globalData->method == HTTPS_PUT)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_UPLOAD, 1L);
-	else if(globalData->method == HTTPS_DELETE)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "DELETE");
-	else if(globalData->method == HTTPS_HEAD)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_NOBODY, 1L);
-	else if(globalData->method == HTTPS_CONNECT)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "CONNECT");
-	else if(globalData->method == HTTPS_OPTIONS)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "OPTIONS");
-	else if(globalData->method == HTTPS_TRACE)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "TRACE");
-
-	//TODO: Proxy support is applicable from libcurl version 7.54.0. Current headless version is 7.53.1
-	//curl_easy_setopt(handle, CURLOPT_PROXY, "http://10.112.1.184:8080/");
-	//curl_easy_setopt(handle, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
-	//curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_HTTP_TRANSFER_DECODING, 0L);
-
-	fprintf(stdout, "Created Curl Easy Stuff \n");
-}
-
-void check_multi_info(GlobalData* globalData) {
+void iotjs_https_check_done(iotjs_https_t* https_data) {
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
 	char *done_url;
 	CURLMsg *message;
 	int pending;
+	bool error = false;
 
-	while ((message = curl_multi_info_read(globalData->curl_handle, &pending))) {
+	while ((message = curl_multi_info_read(_this->curl_handle, &pending))) {
 		switch (message->msg) {
 		case CURLMSG_DONE:
-			curl_easy_getinfo(message->easy_handle, CURLINFO_EFFECTIVE_URL,
-							&done_url);
-			printf("%s DONE\n", done_url);
-			uv_timer_stop(&(globalData->socket_timeout));
-			javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONEND);
-			javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONCLOSED);
-			curl_multi_remove_handle(globalData->curl_handle, message->easy_handle);
-			curl_easy_cleanup(message->easy_handle);
-			globalData->curl_easy_handle = NULL;
-			destroy_GlobalData(globalData);
+			curl_easy_getinfo(message->easy_handle, CURLINFO_EFFECTIVE_URL,	&done_url);
+			printf("%s Request Done \n", done_url);
 			break;
-
 		default:
-			fprintf(stderr, "CURLMSG default\n");
-			abort();
+			error=true;
 		}
+		if(error){
+			iotjs_jargs_t jarg = iotjs_jargs_create(1);
+			char error[] = "Unknown Error has occured.";
+			//TODO: perhaps the exit code should be attached here
+			iotjs_string_t jResultString = iotjs_string_create_with_size(error, strlen(error));
+			iotjs_jargs_append_string(&jarg, &jResultString);
+			iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONERROR, &jarg);
+			iotjs_string_destroy(&jResultString);
+			iotjs_jargs_destroy(&jarg);
+		}
+		//TODO: Check what happens when a request is 404
+		uv_timer_stop(&(_this->socket_timeout));
+		iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONEND, iotjs_jargs_get_empty());
+		iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONCLOSED, iotjs_jargs_get_empty());
+		curl_multi_remove_handle(_this->curl_handle, message->easy_handle);
+		curl_easy_cleanup(message->easy_handle);
+		_this->curl_easy_handle = NULL;
+		iotjs_https_destroy(https_data);
 	}
 }
 
-void curl_perform(uv_poll_t *poll, int status, int events) {
-	GlobalData* globalData = (GlobalData*) poll->data ;
-	printf("Entered in curl_perform \n");
+void iotjs_https_uv_poll_callback(uv_poll_t *poll, int status, int events) {
+	iotjs_https_t* https_data = (iotjs_https_t*) poll->data ;
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	printf("Entered in iotjs_https_uv_poll_callback \n");
 
 	//TODO: Do we need this?
-	//uv_timer_stop(&(globalData->timeout));
+	//uv_timer_stop(&(_this->timeout));
 	int running_handles;
 
 	int flags = 0;
@@ -364,124 +325,212 @@ void curl_perform(uv_poll_t *poll, int status, int events) {
 	if (!status && events & UV_READABLE) flags |= CURL_CSELECT_IN;
 	if (!status && events & UV_WRITABLE) flags |= CURL_CSELECT_OUT;
 
-	curl_multi_socket_action(globalData->curl_handle, globalData->sockfd, flags, &running_handles);
-	check_multi_info(globalData);
-	printf("Leaving curl_perform Call \n");
+	curl_multi_socket_action(_this->curl_handle, _this->sockfd, flags, &running_handles);
+	iotjs_https_check_done(https_data);
+	printf("Leaving iotjs_https_uv_poll_callback Call \n");
 }
 
-static void on_timeout(uv_timer_t *timer) {
-//TODO: do I need to unref/close the timeout handle?
-	GlobalData* globalData = (GlobalData*) (timer->data);
+// This function is for signalling to curl timeout has passed.
+// This timeout is usually given by curl itself.
+static void iotjs_https_uv_timeout_callback(uv_timer_t *timer) {
+	//TODO: do I need to unref/close the timeout handle?
+	iotjs_https_t* https_data = (iotjs_https_t*) (timer->data);
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
 	uv_timer_stop(timer);
 	int running_handles;
-	curl_multi_socket_action(globalData->curl_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
-	check_multi_info(globalData);
+	curl_multi_socket_action(_this->curl_handle, CURL_SOCKET_TIMEOUT, 0, &running_handles);
+	iotjs_https_check_done(https_data);
 	printf("In on timeout \n");
 }
 
-static void socket_timeout(uv_timer_t *timer){
+static void iotjs_https_uv_socket_timeout_callback(uv_timer_t *timer){
 	//TODO: do I need to unref/close the timeout handle?
-	GlobalData* globalData = (GlobalData*) (timer->data);
+	iotjs_https_t* https_data = (iotjs_https_t*) (timer->data);
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
 	double downloadBytes = 0;
 	double uploadBytes = 0;
 	uint64_t totalTime_ms = 0;
 
-	if(globalData->timeout_ms!=-1){
-		curl_easy_getinfo(globalData->curl_easy_handle, CURLINFO_SIZE_DOWNLOAD, &downloadBytes);
-		curl_easy_getinfo(globalData->curl_easy_handle, CURLINFO_SIZE_UPLOAD, &uploadBytes);
-		totalTime_ms = uv_now(globalData->loop);
+	if(_this->timeout_ms!=-1){
+		curl_easy_getinfo(_this->curl_easy_handle, CURLINFO_SIZE_DOWNLOAD, &downloadBytes);
+		curl_easy_getinfo(_this->curl_easy_handle, CURLINFO_SIZE_UPLOAD, &uploadBytes);
+		totalTime_ms = uv_now(_this->loop);
 		double totalBytes = downloadBytes + uploadBytes;
 
 		printf("----------In on Timeout-------------\n");
 		printf("Total bytes Downloaded so far - %f \n", downloadBytes);
 		printf("Total bytes Uploaded so far - %f \n", uploadBytes);
 		printf("Total bytes so far - %f \n", totalBytes);
-		printf("LastNumBytes - %f \n", globalData->lastNumBytes);
+		printf("LastNumBytes - %f \n", _this->last_bytes_num);
 		printf("Time so far - %llu \n", totalTime_ms);
-		printf("Time for timeout - %llu \n", ((uint64_t)globalData->timeout_ms + globalData->lastTime));
+		printf("Time for timeout - %llu \n", ((uint64_t)_this->timeout_ms + _this->last_bytes_time));
 
-		if(globalData->lastNumBytes == totalBytes){
+		if(_this->last_bytes_num == totalBytes){
 			printf("Got inside first if \n \n");
-			if( totalTime_ms > ((uint64_t)globalData->timeout_ms + globalData->lastTime) ){
+			if( totalTime_ms > ((uint64_t)_this->timeout_ms + _this->last_bytes_time) ){
 				//TODO: Handle the case when request is already over
-				javascriptCallback(globalData, IOTJS_MAGIC_STRING_ONTIMEOUT);
-				uv_timer_stop(&(globalData->socket_timeout));
+				iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONTIMEOUT, iotjs_jargs_get_empty());
+				uv_timer_stop(&(_this->socket_timeout));
 			}
 		}
 		else{
-			globalData->lastNumBytes = totalBytes;
-			globalData->lastTime = totalTime_ms;
+			_this->last_bytes_num = totalBytes;
+			_this->last_bytes_time = totalTime_ms;
 		}
 	}
 }
 
 
-static void set_timeout(long ms, GlobalData* globalData) {
-//TODO: do I need to unref/close the timeout handle?
+void iotjs_https_set_timeout(long ms, iotjs_https_t* https_data) {
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	//TODO: do I need to unref/close the timeout handle?
 	if(ms < 0)
 		return;
-	globalData->timeout_ms = ms;
+	_this->timeout_ms = ms;
 	//TODO: repeated timeouts
-	uv_timer_start(&(globalData->socket_timeout), socket_timeout, 1, (uint64_t) ms);
+	uv_timer_start(&(_this->socket_timeout), iotjs_https_uv_socket_timeout_callback, 1, (uint64_t) ms);
 
-	printf("In set_timeout \n");
+	printf("In iotjs_https_set_timeout \n");
 }
 
-static int start_timeout(CURLM *multi, long timeout_ms, void *userp) {
-printf("Setting a uv_timer %ld \n", timeout_ms);
 
-	GlobalData* globalData = (GlobalData*) userp;
+void iotjs_https_add_header(iotjs_https_t* https_data, const char* charHeader) {
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	_this->header_list = curl_slist_append(_this->header_list, charHeader);
+	if (_this->method == HTTPS_POST || _this->method == HTTPS_PUT){
+		if (strncmp(charHeader, "Content-Length: ", strlen("Content-Length: ")) == 0 ){
+			const char* numberString = charHeader+strlen("Content-Length: ");
+			_this->content_length = strtol(numberString, NULL, 10);
+			printf("Got content_length as  %ld\n", _this->content_length);
+		}
+	}
+	printf("In iotjs_https_add_header \n");
+}
+
+
+void iotjs_https_send_request(iotjs_https_t* https_data) {
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	//Add all the headers to the easy handle
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_HTTPHEADER, _this->header_list);
+
+	if (_this->method == HTTPS_POST && _this->content_length != -1)
+		curl_easy_setopt(_this->curl_easy_handle, CURLOPT_POSTFIELDSIZE, _this->content_length );
+	else if (_this->method == HTTPS_PUT && _this->content_length != -1)
+		curl_easy_setopt(_this->curl_easy_handle, CURLOPT_INFILESIZE, _this->content_length );
+
+	curl_multi_add_handle(_this->curl_handle, _this->curl_easy_handle);
+
+	printf("Added download \n");
+}
+
+
+void iotjs_https_js_data_to_write(iotjs_https_t* https_data, iotjs_string_t read_chunk, const iotjs_jval_t* callback, const iotjs_jval_t* onwrite){
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	_this->read_chunk = read_chunk;
+	_this->data_to_read=true;
+
+	if(_this->to_destroy_read_onwrite){
+		_this->to_destroy_read_onwrite = false;
+		iotjs_jval_destroy(&(_this->read_onwrite));
+		iotjs_jval_destroy(&(_this->read_callback));
+	}
+
+	_this->read_callback = iotjs_jval_create_copied(callback);
+	printf("Got read callback in _write \n");
+
+	_this->read_onwrite = iotjs_jval_create_copied(onwrite);
+	_this->to_destroy_read_onwrite = true;
+	printf("Got onwrite callback in _write \n");
+
+	if(_this->is_stream_writable){
+		printf("Unpaused _write \n");
+		curl_easy_pause(_this->curl_easy_handle, CURLPAUSE_CONT);
+		uv_timer_stop(&(_this->timeout));
+		uv_timer_start(&(_this->timeout), iotjs_https_uv_timeout_callback, 1, 0);
+	}
+}
+
+
+void iotjs_https_finish_request(iotjs_https_t* https_data){
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+ 	_this->stream_ended=true;
+
+	if(_this->is_stream_writable){
+		printf("4 \n");
+		printf("Unpaused in iotjs_https_finish_request \n");
+		curl_easy_pause(_this->curl_easy_handle, CURLPAUSE_CONT);
+		uv_timer_stop(&(_this->timeout));
+		uv_timer_start(&(_this->timeout), iotjs_https_uv_timeout_callback, 1, 0);
+	}
+}
+
+void iotsj_https_abort(iotjs_https_t* https_data){
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	//Should end and close events be fired here?
+	uv_timer_stop(&(_this->socket_timeout));
+	curl_multi_remove_handle(_this->curl_handle, _this->curl_easy_handle);
+	curl_easy_cleanup(_this->curl_easy_handle);
+	_this->curl_easy_handle = NULL;
+	iotjs_https_destroy(https_data);
+}
+
+
+int iotjs_https_curl_start_timeout_callback(CURLM *multi, long timeout_ms, void *userp) {
+	printf("Setting a uv_timer %ld \n", timeout_ms);
+	iotjs_https_t* https_data = (iotjs_https_t*) userp;
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
 	if(timeout_ms < 0) {
-		uv_timer_stop(&(globalData->timeout));
+		uv_timer_stop(&(_this->timeout));
 	}
 	else {
 		if(timeout_ms == 0)
 			timeout_ms = 1; //0 means directly call socket_action, but we'll do it in a bit
-		if((globalData->timeout_ms!=-1)&&(timeout_ms > globalData->timeout_ms))
-			timeout_ms = globalData->timeout_ms;
-		uv_timer_start(&(globalData->timeout), on_timeout,(uint64_t) timeout_ms, 0);
+		if((_this->timeout_ms!=-1)&&(timeout_ms > _this->timeout_ms))
+			timeout_ms = _this->timeout_ms;
+		uv_timer_start(&(_this->timeout), iotjs_https_uv_timeout_callback,(uint64_t) timeout_ms, 0);
 	}
 	return 0;
 }
 
 
-int handle_socket(CURL *easy, curl_socket_t sockfd, int action, void *userp, void *socketp) {
+int iotjs_https_curl_socket_callback(CURL *easy, curl_socket_t sockfd, int action, void *userp, void *socketp) {
 	printf("in HandleSocket \n");
-	GlobalData* globalData = (GlobalData*) userp;
-	//if(globalData->isStreamWritable){
-	//	printf("Unpaused in handle_socket \n");
-	//	curl_easy_pause(globalData->curl_easy_handle, CURLPAUSE_CONT);
+	iotjs_https_t* https_data = (iotjs_https_t*) userp;
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+	//if(_this->is_stream_writable){
+	//	printf("Unpaused in iotjs_https_curl_socket_callback \n");
+	//	curl_easy_pause(_this->curl_easy_handle, CURLPAUSE_CONT);
 	//}
 	if (action == CURL_POLL_IN || action == CURL_POLL_OUT|| action == CURL_POLL_INOUT) {
 		if (!socketp) {
-			globalData->sockfd = sockfd;
-			uv_poll_init_socket(globalData->loop, &globalData->poll_handle, sockfd);
-			(&globalData->poll_handle)->data = globalData;
-			curl_multi_assign(globalData->curl_handle, sockfd, (void *) globalData);
+			_this->sockfd = sockfd;
+			uv_poll_init_socket(_this->loop, &_this->poll_handle, sockfd);
+			(&_this->poll_handle)->data = https_data;
+			curl_multi_assign(_this->curl_handle, sockfd, (void *) https_data);
 		}
 	}
 
 	switch (action) {
 		case CURL_POLL_IN:
-			uv_poll_start(&globalData->poll_handle, UV_READABLE, curl_perform);
+			uv_poll_start(&_this->poll_handle, UV_READABLE, iotjs_https_uv_poll_callback);
 			printf("in in HandleSocket \n");
 			break;
 		case CURL_POLL_OUT:
-			uv_poll_start(&globalData->poll_handle, UV_WRITABLE, curl_perform);
+			uv_poll_start(&_this->poll_handle, UV_WRITABLE, iotjs_https_uv_poll_callback);
 			printf("in out HandleSocket \n");
 			break;
 		case CURL_POLL_INOUT:
-			uv_poll_start(&globalData->poll_handle, UV_READABLE|UV_WRITABLE, curl_perform);
+			uv_poll_start(&_this->poll_handle, UV_READABLE|UV_WRITABLE, iotjs_https_uv_poll_callback);
 			printf("in inout HandleSocket \n");
 			break;
 		case CURL_POLL_REMOVE:
 			printf("in remove HandleSocket \n");
 			if (socketp) {
-				printf("Leaving handle_socket POLL_REMOVE \n");
-				uv_poll_stop(&globalData->poll_handle);
-				uv_close((uv_handle_t *) &globalData->poll_handle, NULL);
-				globalData->poll_handle_destroyed = true;
-				curl_multi_assign(globalData->curl_handle, sockfd, NULL);
+				printf("Leaving iotjs_https_curl_socket_callback POLL_REMOVE \n");
+				uv_poll_stop(&_this->poll_handle);
+				uv_close((uv_handle_t *) &_this->poll_handle, NULL);
+				_this->poll_handle_destroyed = true;
+				curl_multi_assign(_this->curl_handle, sockfd, NULL);
 			}
 			break;
 		default:
@@ -491,96 +540,66 @@ int handle_socket(CURL *easy, curl_socket_t sockfd, int action, void *userp, voi
 	return 0;
 }
 
-void doAll(const char* URL,	const char* method, const char* ca, const char* cert, const char* key, const iotjs_jval_t* jthis){
-	//loop = malloc(sizeof(uv_loop_t));
-		//uv_loop_init(loop);
 
-	if (curl_global_init(CURL_GLOBAL_SSL)) {
-		fprintf(stderr, "Could not init cURL\n");
-		return;
+void iotjs_https_initialize_curl_opts(iotjs_https_t* https_data) {
+	IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+
+	// Setup Some parameters for multi handle
+	curl_multi_setopt(_this->curl_handle, CURLMOPT_SOCKETFUNCTION, iotjs_https_curl_socket_callback);
+	curl_multi_setopt(_this->curl_handle, CURLMOPT_SOCKETDATA, (void*) _this);
+	curl_multi_setopt(_this->curl_handle, CURLMOPT_TIMERFUNCTION, iotjs_https_curl_start_timeout_callback);
+	curl_multi_setopt(_this->curl_handle, CURLMOPT_TIMERDATA, (void*) _this);
+
+	//TODO: Remove Verbose and Proxy
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_VERBOSE, 1L);
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_PROXY, "");
+
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_HEADERDATA, (void *) https_data);
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_WRITEFUNCTION, iotjs_https_curl_write_callback);
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_WRITEDATA, (void *) https_data);
+
+	//Read and send data to server only for some request types
+	if(_this->method == HTTPS_POST ||
+		_this->method == HTTPS_PUT ||
+		_this->method == HTTPS_CONNECT){
+		curl_easy_setopt(_this->curl_easy_handle, CURLOPT_READFUNCTION, iotjs_https_curl_read_callback);
+		curl_easy_setopt(_this->curl_easy_handle, CURLOPT_READDATA, (void *) https_data);
 	}
 
-	GlobalData* globalData = (GlobalData*)malloc(sizeof(GlobalData));
-	printf("The Address of globalData is %p \n", globalData);
-	if(NULL == globalData)	{
-		printf("\n No more memory to great structures. Failure. \n");
-		return;
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_SOCKOPTFUNCTION, iotjs_https_curl_sockopt_callback);
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_SOCKOPTDATA, (void *) https_data);
+
+	curl_easy_setopt(_this->curl_easy_handle, CURLOPT_URL, _this->URL);
+	_this->URL = NULL;
+
+	if(strlen(_this->ca) > 0)
+		curl_easy_setopt(_this->curl_easy_handle, CURLOPT_CAINFO, _this->ca);
+	_this->ca = NULL;
+	if(strlen(_this->cert) > 0)
+		curl_easy_setopt(_this->curl_easy_handle, CURLOPT_SSLCERT, _this->cert);
+	_this->cert = NULL;
+	if(strlen(_this->key) > 0)
+		curl_easy_setopt(_this->curl_easy_handle, CURLOPT_SSLKEY, _this->key);
+	_this->key = NULL;
+
+	//Various request types
+	switch(_this->method){
+		case HTTPS_GET: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_HTTPGET, 1L); break;
+		case HTTPS_POST: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_POST, 1L); break;
+		case HTTPS_PUT: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_UPLOAD, 1L); break;
+		case HTTPS_DELETE: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "DELETE"); break;
+		case HTTPS_HEAD: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_NOBODY, 1L); break;
+		case HTTPS_CONNECT: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "CONNECT"); break;
+		case HTTPS_OPTIONS: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "OPTIONS"); break;
+		case HTTPS_TRACE: curl_easy_setopt(_this->curl_easy_handle, CURLOPT_CUSTOMREQUEST, "TRACE"); break;
 	}
 
-	globalData->loop = iotjs_environment_loop(iotjs_environment_get());
-	globalData->jthis_native=iotjs_jval_create_copied(jthis);
-	iotjs_jval_set_object_native_handle(& (globalData->jthis_native), (uintptr_t) globalData, &temp_native_info);
-	globalData->headerList = NULL;
+	//TODO: Proxy support is applicable from libcurl version 7.54.0. Current headless version is 7.53.1
+	//curl_easy_setopt(handle, CURLOPT_PROXY, "http://10.112.1.184:8080/");
+	//curl_easy_setopt(handle, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
+	//curl_easy_setopt(_this->curl_easy_handle, CURLOPT_HTTP_TRANSFER_DECODING, 0L);
 
-	globalData->curl_handle = curl_multi_init();
-	globalData->timeout.data = (void*) globalData;
-	uv_timer_init(globalData->loop, &(globalData->timeout));
-
-	printf("Saving URL in globalData \n");
-	globalData->URL=URL;
-
-	if(strcmp(method,"GET") == 0)
-		globalData->method=HTTPS_GET;
-	else if(strcmp(method,"POST") == 0)
-		globalData->method=HTTPS_POST;
-	else if(strcmp(method,"PUT") == 0)
-		globalData->method=HTTPS_PUT;
-	else if(strcmp(method,"DELETE") == 0)
-		globalData->method=HTTPS_DELETE;
-	else if(strcmp(method,"HEAD") == 0)
-		globalData->method=HTTPS_HEAD;
-	else if(strcmp(method,"CONNECT") == 0)
-		globalData->method=HTTPS_CONNECT;
-	else if(strcmp(method,"OPTIONS") == 0)
-		globalData->method=HTTPS_OPTIONS;
-	else if(strcmp(method,"TRACE") == 0)
-		globalData->method=HTTPS_TRACE;
-	else{
-		printf("Request method is not valid. Valid options are GET, POST, PUT, DELETE, HEAD");
-		//TODO: cleanup and gracefully exit.
-	}
-
-	globalData->poll_handle_destroyed = false;
-
-	//Timeout stuff
-	globalData->timeout_ms=-1;
-	globalData->lastNumBytes=-1;
-	globalData->socket_timeout.data = (void*) globalData;
-	uv_timer_init(globalData->loop, &(globalData->socket_timeout));
-
-	//ReadData stuff
-	globalData->curReadIndex=0;
-	globalData->isStreamWritable=false;
-	globalData->streamEnded=false;
-	globalData->dataToRead=false;
-	globalData->toDestroyReadOnWrite = false;
-	globalData->async_readOnWrite.data = (void*) globalData;
-	uv_timer_init(globalData->loop, &(globalData->async_readOnWrite));
-	//No Need to read data for following types of requests
-	if(globalData->method == HTTPS_GET ||
-		globalData->method == HTTPS_DELETE ||
-		globalData->method == HTTPS_HEAD ||
-		globalData->method == HTTPS_OPTIONS ||
-		globalData->method == HTTPS_TRACE){
-		globalData->streamEnded=true;
-	}
-
-	curl_multi_setopt(globalData->curl_handle, CURLMOPT_SOCKETFUNCTION, handle_socket);
-	curl_multi_setopt(globalData->curl_handle, CURLMOPT_SOCKETDATA, (void*) globalData);
-	curl_multi_setopt(globalData->curl_handle, CURLMOPT_TIMERFUNCTION, start_timeout);
-	curl_multi_setopt(globalData->curl_handle, CURLMOPT_TIMERDATA, (void*) globalData);
-
-	//Content Length stuff
-	globalData->contentLength = -1;
-
-	//TLS certs stuff
-	globalData->ca = ca;
-	globalData->cert = cert;
-	globalData->key = key;
-
-	add_download(globalData);
-	//curl_multi_cleanup(curl_handle);
-	return;
+	fprintf(stdout, "Set Most Curl Opts \n");
 }
 
 
@@ -615,7 +634,16 @@ JHANDLER_FUNCTION(createRequest) {
 	iotjs_jval_destroy(&jkey);
 	printf("Got key in Native Code as %s \n", iotjs_string_data(&key));
 
-	doAll(iotjs_string_data(&host), iotjs_string_data(&method), iotjs_string_data(&ca), iotjs_string_data(&cert), iotjs_string_data(&key), jthis);
+
+	if (curl_global_init(CURL_GLOBAL_SSL)) {
+		fprintf(stderr, "Could not init cURL\n");
+		return;
+	}
+	iotjs_https_t* https_data = iotjs_https_create(iotjs_string_data(&host),
+		iotjs_string_data(&method), iotjs_string_data(&ca), iotjs_string_data(&cert),
+		iotjs_string_data(&key), jthis);
+
+	iotjs_https_initialize_curl_opts(https_data);
 
 	iotjs_string_destroy(&host);
 	iotjs_string_destroy(&method);
@@ -635,17 +663,8 @@ JHANDLER_FUNCTION(addHeader) {
 	printf("Got header in Native Code as %s \n", charHeader);
 
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(1, object);
-
-	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
-
-	globalData->headerList = curl_slist_append(globalData->headerList, charHeader);
-	if (globalData->method == HTTPS_POST || globalData->method == HTTPS_PUT){
-		if (strncmp(charHeader, "Content-Length: ", strlen("Content-Length: ")) == 0 ){
-			const char* numberString = charHeader+strlen("Content-Length: ");
-			globalData->contentLength = strtol(numberString, NULL, 10);
-			printf("Got contentLength as  %ld\n", globalData->contentLength);
-		}
-	}
+	iotjs_https_t* https_data = (iotjs_https_t*) iotjs_jval_get_object_native_handle(jthis);
+	iotjs_https_add_header (https_data, charHeader);
 
 	iotjs_string_destroy(&header);
 	printf("Leaving JHANDLER \n");
@@ -657,21 +676,8 @@ JHANDLER_FUNCTION(sendRequest) {
 
 	JHANDLER_CHECK_ARG(0, object);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
-
-	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
-
-	//Add all the headers to the easy handle
-	curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_HTTPHEADER, globalData->headerList);
-
-	if (globalData->method == HTTPS_POST && globalData->contentLength != -1)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_POSTFIELDSIZE, globalData->contentLength );
-	else if (globalData->method == HTTPS_PUT && globalData->contentLength != -1)
-		curl_easy_setopt(globalData->curl_easy_handle, CURLOPT_INFILESIZE, globalData->contentLength );
-
-
-	curl_multi_add_handle(globalData->curl_handle, globalData->curl_easy_handle);
-
-	fprintf(stdout, "Added download \n");
+	iotjs_https_t* https_data = (iotjs_https_t*) iotjs_jval_get_object_native_handle(jthis);
+	iotjs_https_send_request(https_data);
 
 	printf("Leaving JHANDLER \n");
 	iotjs_jhandler_return_null(jhandler);
@@ -685,89 +691,45 @@ JHANDLER_FUNCTION(setTimeout) {
 	printf("Got timeout time in Native Code as %f \n", ms);
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(1, object);
 
-	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
-	//printf(" ------ Can Retrieve the tempvar in NativeCode as ----- %d \n", globalData->tempvar);
-	set_timeout( (long) ms, globalData);
+	iotjs_https_t* https_data = (iotjs_https_t*) iotjs_jval_get_object_native_handle(jthis);
+	iotjs_https_set_timeout( (long) ms, https_data);
 
 	printf("Leaving JHANDLER \n");
 	iotjs_jhandler_return_null(jhandler);
 }
 
 JHANDLER_FUNCTION(_write) {
-	printf("******************Entered _write JHANDLER *****************\n");
+	printf("Entered _write JHANDLER \n");
 	JHANDLER_CHECK_THIS(object);
-
 	JHANDLER_CHECK_ARGS(2, object, string);
 	//Argument 3 can be null, so not checked here, checked below.
 	JHANDLER_CHECK_ARG(3, function);
 
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
-	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
+	iotjs_string_t read_chunk = JHANDLER_GET_ARG(1, string);
+	printf("Got Data in _write as %s \n", iotjs_string_data(&read_chunk));
 
-	globalData->readChunk = JHANDLER_GET_ARG(1, string);
-	printf("Got Data in _write as %s \n", iotjs_string_data(&(globalData->readChunk)));
-	globalData->dataToRead=true;
-
-	if(globalData->toDestroyReadOnWrite){
-		globalData->toDestroyReadOnWrite = false;
-		iotjs_jval_destroy(&(globalData->readOnWrite));
-		iotjs_jval_destroy(&(globalData->readCallback));
-	}
-
-	const iotjs_jval_t* callback;
-	callback = iotjs_jhandler_get_arg(jhandler, 2);
-	if(iotjs_jval_is_undefined(callback))
-		printf("callback in _onwrite is undefined\n");
-
-	globalData->readCallback = iotjs_jval_create_copied(callback);
-	printf("Got read callback in _write \n");
-
+	const iotjs_jval_t* callback = iotjs_jhandler_get_arg(jhandler, 2);
 	const iotjs_jval_t* onwrite = JHANDLER_GET_ARG(3, function);
 
-	globalData->readOnWrite = iotjs_jval_create_copied(onwrite);
-	globalData->toDestroyReadOnWrite = true;
-	printf("Got onwrite callback in _write \n");
+	iotjs_https_t* https_data = (iotjs_https_t*) iotjs_jval_get_object_native_handle(jthis);
+	iotjs_https_js_data_to_write(https_data, read_chunk, callback, onwrite);
 
-	//JHANDLER_CHECK_ARG(0, number);
-	//double ms = JHANDLER_GET_ARG(0, number);
-	//printf("Got timeout time in Native Code as %f \n", ms);
-
-	if(globalData->isStreamWritable){
-		printf("Unpaused _write \n");
-		curl_easy_pause(globalData->curl_easy_handle, CURLPAUSE_CONT);
-		uv_timer_stop(&(globalData->timeout));
-		uv_timer_start(&(globalData->timeout), on_timeout, 1, 0);
-	}
-
-	printf("******************Leaving _write JHANDLER *****************\n");
+	//readchunk was copied to https_data, hence not destroyed.
+	printf("Leaving _write JHANDLER\n");
 	iotjs_jhandler_return_null(jhandler);
 }
 
 JHANDLER_FUNCTION(finishRequest) {
-	printf("******************Entered finishRequest JHANDLER *****************\n");
+	printf("Entered finishRequest JHANDLER\n");
 	JHANDLER_CHECK_THIS(object);
 	JHANDLER_CHECK_ARG(0, object);
 
-	printf("1 \n");
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
-	printf("2 \n");
-	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
-	printf("3 \n");
-	globalData->streamEnded=true;
+	iotjs_https_t* https_data = (iotjs_https_t*) iotjs_jval_get_object_native_handle(jthis);
+	iotjs_https_finish_request(https_data);
 
-	//JHANDLER_CHECK_ARG(0, number);
-	//double ms = JHANDLER_GET_ARG(0, number);
-	//printf("Got timeout time in Native Code as %f \n", ms);
-
-	if(globalData->isStreamWritable){
-		printf("4 \n");
-		printf("Unpaused in handle_socket \n");
-		curl_easy_pause(globalData->curl_easy_handle, CURLPAUSE_CONT);
-		uv_timer_stop(&(globalData->timeout));
-		uv_timer_start(&(globalData->timeout), on_timeout, 1, 0);
-	}
-
-	printf("******************Leaving finishRequest JHANDLER *****************\n");
+	printf("Leaving finishRequest JHANDLER \n");
 	iotjs_jhandler_return_null(jhandler);
 }
 
@@ -777,20 +739,14 @@ JHANDLER_FUNCTION(Abort) {
 	JHANDLER_CHECK_ARG(0, object);
 
 	const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
-	GlobalData* globalData = (GlobalData*) iotjs_jval_get_object_native_handle(jthis);
-
-	uv_timer_stop(&(globalData->socket_timeout));
-	curl_multi_remove_handle(globalData->curl_handle, globalData->curl_easy_handle);
-	curl_easy_cleanup(globalData->curl_easy_handle);
-	globalData->curl_easy_handle = NULL;
-	destroy_GlobalData(globalData);
+	iotjs_https_t* https_data = (iotjs_https_t*) iotjs_jval_get_object_native_handle(jthis);
+	iotsj_https_abort(https_data);
 
 	printf("Leaving Abort \n");
 	iotjs_jhandler_return_null(jhandler);
 }
 
 iotjs_jval_t InitHttps() {
-
 	iotjs_jval_t https = iotjs_jval_create_object();
 
 	iotjs_jval_set_method(&https, IOTJS_MAGIC_STRING_CREATEREQUEST, createRequest);
