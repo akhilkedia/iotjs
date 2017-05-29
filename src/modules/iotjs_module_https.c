@@ -22,14 +22,14 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void https_jthis_native_destroy(void* nativep) {
+static void iotjs_https_jthis_destroy(void* nativep) {
   iotjs_https_t* https_data = (iotjs_https_t*)nativep;
   IOTJS_RELEASE(https_data);
   printf("destroyed native jthis\n");
 }
 
-static const jerry_object_native_info_t temp_native_info = {
-  .free_cb = (jerry_object_native_free_callback_t)https_jthis_native_destroy
+static const jerry_object_native_info_t native_info = {
+  .free_cb = (jerry_object_native_free_callback_t)iotjs_https_jthis_destroy
 };
 
 // Constructor
@@ -75,7 +75,7 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
   _this->loop = iotjs_environment_loop(iotjs_environment_get());
   _this->jthis_native = iotjs_jval_create_copied(jthis);
   iotjs_jval_set_object_native_handle(&(_this->jthis_native),
-                                      (uintptr_t)https_data, &temp_native_info);
+                                      (uintptr_t)https_data, &native_info);
   _this->curl_multi_handle = curl_multi_init();
   _this->curl_easy_handle = curl_easy_init();
   _this->timeout.data = (void*)https_data;
@@ -109,8 +109,7 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
 // Destructor
 void iotjs_https_destroy(iotjs_https_t* https_data) {
   printf("Destroying iotjs_https_t \n");
-  // IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
-  IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+  IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
 
   curl_multi_cleanup(_this->curl_multi_handle);
   uv_close((uv_handle_t*)&(_this->timeout), NULL);
@@ -167,11 +166,12 @@ void iotjs_https_call_read_onwrite(uv_timer_t* timer) {
   const iotjs_jval_t* jthis = &(_this->jthis_native);
   IOTJS_ASSERT(iotjs_jval_is_function(&(_this->read_onwrite)));
 
-  printf("Invoking CallBack To JS read_onwrite\n");
-  iotjs_make_callback(&(_this->read_onwrite), jthis, jarg);
-
+  printf("Invoking CallBack To JS read_callback\n");
   if (!iotjs_jval_is_undefined(&(_this->read_callback)))
     iotjs_make_callback(&(_this->read_callback), jthis, jarg);
+
+  printf("Invoking CallBack To JS read_onwrite\n");
+  iotjs_make_callback(&(_this->read_onwrite), jthis, jarg);
   printf("Exiting iotjs_https_call_read_onwrite\n");
 }
 
@@ -258,7 +258,13 @@ size_t iotjs_https_curl_write_callback(void* contents, size_t size,
   size_t real_size = size * nmemb;
   printf("Entered iotjs_https_curl_write_callback \n");
 
+  //TODO: Verify that below pretending doesnt break chunked encoding.
   if (!_this->stream_ended || _this->data_to_read) {
+    //Pretend we Finished sending one chunk of data
+    //_this->cur_read_index = 0;
+    //_this->data_to_read = false;
+    //iotjs_string_destroy(&(_this->read_chunk));
+    //iotjs_https_call_read_onwrite_async(https_data);
     printf("Pausing Write \n");
     return CURL_WRITEFUNC_PAUSE;
   }
@@ -269,7 +275,7 @@ size_t iotjs_https_curl_write_callback(void* contents, size_t size,
     iotjs_jval_destroy(&(_this->read_callback));
   }
 
-  // TODO: Separate this out in a different function
+  printf("Here1 iotjs_https_curl_write_callback\n");
   if (iotjs_jval_is_null(&_this->jthis_native))
     return 0;
   iotjs_jargs_t jarg = iotjs_jargs_create(1);
@@ -340,7 +346,6 @@ void iotjs_https_uv_poll_callback(uv_poll_t* poll, int status, int events) {
 
   // TODO: Do we need this?
   // uv_timer_stop(&(_this->timeout));
-  int running_handles;
 
   int flags = 0;
   if (status < 0)
@@ -351,7 +356,7 @@ void iotjs_https_uv_poll_callback(uv_poll_t* poll, int status, int events) {
     flags |= CURL_CSELECT_OUT;
 
   curl_multi_socket_action(_this->curl_multi_handle, _this->sockfd, flags,
-                           &running_handles);
+                           &_this->running_handles);
   iotjs_https_check_done(https_data);
   printf("Leaving iotjs_https_uv_poll_callback Call \n");
 }
@@ -363,9 +368,8 @@ static void iotjs_https_uv_timeout_callback(uv_timer_t* timer) {
   iotjs_https_t* https_data = (iotjs_https_t*)(timer->data);
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   uv_timer_stop(timer);
-  int running_handles;
   curl_multi_socket_action(_this->curl_multi_handle, CURL_SOCKET_TIMEOUT, 0,
-                           &running_handles);
+                           &_this->running_handles);
   iotjs_https_check_done(https_data);
   printf("In on timeout \n");
 }
@@ -541,6 +545,7 @@ int iotjs_https_curl_socket_callback(CURL* easy, curl_socket_t sockfd,
       action == CURL_POLL_INOUT) {
     if (!socketp) {
       _this->sockfd = sockfd;
+      printf("Assigned Socket\n");
       uv_poll_init_socket(_this->loop, &_this->poll_handle, sockfd);
       _this->poll_handle_to_be_destroyed = true;
       (&_this->poll_handle)->data = https_data;

@@ -54,6 +54,7 @@ typedef struct {
   uv_poll_t poll_handle;
   curl_socket_t sockfd;
   bool poll_handle_to_be_destroyed;
+  int running_handles;
 
   // For SetTimeOut
   uv_timer_t socket_timeout;

@@ -20,8 +20,7 @@ var httpsNative = process.binding(process.binding.https);
 
 function ClientRequest(options, cb) {
   console.log('ClientRequest constructor');
-  stream.Writable.call(this, options);
-  var self = this;
+  this.stream = stream.Writable.call(this, options);
 
   // get port, host and method.
   var port = options.port = options.port || 443;
@@ -73,16 +72,13 @@ exports.ClientRequest = ClientRequest;
 // Concrete stream overriding the empty underlying _write method.
 ClientRequest.prototype._write = function(chunk, callback, onwrite) {
   console.log('In js _write');
-  //TODO: Save onwrite and callback on C side using jobject.
-  this._onwritehack = onwrite;
-  this._callbackhack = callback;
   httpsNative._write(this, chunk.toString(), callback, onwrite);
 };
 
 ClientRequest.prototype.headersComplete = function() {
   var self = this;
   console.log('In Response CallBack. The host is - ');
-  console.log(self._host);
+  console.log(self.host);
   if (self._cb) {
     console.log('calling response cb');
     self.emit('response', self._incoming);
@@ -98,12 +94,6 @@ ClientRequest.prototype.onError = function(ret) {
 ClientRequest.prototype.onFinish = function() {
   console.log('in onfinish');
   httpsNative.finishRequest(this);
-  if (this._onwritehack != null) {
-    this._onwritehack = null;
-  }
-  if (this._callbackhack != null) {
-    this._callbackhack = null;
-  }
 };
 
 ClientRequest.prototype.setTimeout = function(ms, cb) {
