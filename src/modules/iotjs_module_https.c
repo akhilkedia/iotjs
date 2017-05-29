@@ -276,7 +276,7 @@ size_t iotjs_https_curl_write_callback(void* contents, size_t size,
   // string.
   // iotjs_jargs_append_jval(&jarg, &jresult_arr);
 
-  iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONBODY, &jarg);
+  iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONDATA, &jarg);
 
   iotjs_jval_destroy(&jresult_arr);
   iotjs_string_destroy(&jresult_string);
