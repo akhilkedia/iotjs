@@ -14,8 +14,8 @@
  * limitations under the License.
  */
 
-#ifndef IOTJS_MODULE_HTTPS_H_
-#define IOTJS_MODULE_HTTPS_H_
+#ifndef IOTJS_MODULE_HTTPS_H
+#define IOTJS_MODULE_HTTPS_H
 
 #include "iotjs_def.h"
 #include <curl/curl.h>
@@ -32,8 +32,7 @@ typedef enum {
 	HTTPS_TRACE
 } HTTPS_Methods;
 
-// -----------A Per-Request Struct-----------
-
+// A Per-Request Struct
 typedef struct {
 	//Original Request Details
 	const char* URL;
@@ -49,7 +48,7 @@ typedef struct {
 	//Handles
 	uv_loop_t *loop;
 	iotjs_jval_t jthis_native;
-	CURLM *curl_handle;
+	CURLM *curl_multi_handle;
 	uv_timer_t timeout;
 	CURL *curl_easy_handle;
 	//Curl Context
@@ -77,5 +76,4 @@ typedef struct {
 
 } IOTJS_VALIDATED_STRUCT(iotjs_https_t);
 
-
-#endif /* IOTJS_MODULE_HTTPS_H_ */
+#endif /* IOTJS_MODULE_HTTPS_H */
