@@ -1,7 +1,23 @@
+/* Copyright 2017-present Samsung Electronics Co., Ltd. and other contributors
+ *
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ *     http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 //To run this, first cd to the iotjs folder you cloned
 //Then start an https server with - node ./temp/NodejsHttpsServer.js
 //Then build iotjs - ./tools/build.py
-//Then to finally test the HTTPS module run - ./build/x86_64-linux/debug/bin/iotjs ./temp/akhil-test.js
+//Then to finally test the HTTPS module run -
+// ./build/x86_64-linux/debug/bin/iotjs ./temp/akhil-test.js
 //WILL NEED A PROXY FREE INTERNET
 
 var https = require('https');
@@ -12,7 +28,7 @@ console.log('akhil-test begin');
 //************Request 1 ************
 options = {
   method: 'GET',
-  //	host: "eu.httpbin.org",
+  //host: "eu.httpbin.org",
   host: 'localhost',
   path: '/',
   port: 4443,
@@ -42,6 +58,8 @@ var getResponseHandler = function(res) {
 var req1 = https.request(options, getResponseHandler);
 //Note - END MUST BE CALLED!!!!!!
 req1.end();
+
+
 
 //************ Request 2 ************
 options2 = {
@@ -106,7 +124,7 @@ var getResponseHandler2 = function(res) {
   });
   //TODO: Will need to check in timeout
   //res.on('timeout', function() {
-  //	console.log("Got TIMEOUT!!!");
+  //  console.log("Got TIMEOUT!!!");
   //});
 };
 

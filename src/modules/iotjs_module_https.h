@@ -13,13 +13,12 @@
  * limitations under the License.
  */
 
-
 #ifndef IOTJS_MODULE_HTTPS_H
 #define IOTJS_MODULE_HTTPS_H
 
-#include <curl/curl.h>
-#include <uv.h>
 #include "iotjs_def.h"
+#include <uv.h>
+#include <curl/curl.h>
 
 typedef enum {
   HTTPS_GET = 0,
@@ -54,7 +53,7 @@ typedef struct {
   // Curl Context
   uv_poll_t poll_handle;
   curl_socket_t sockfd;
-  bool poll_handle_destroyed;
+  bool poll_handle_to_be_destroyed;
 
   // For SetTimeOut
   uv_timer_t socket_timeout;

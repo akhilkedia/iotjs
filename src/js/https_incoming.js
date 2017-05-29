@@ -4,7 +4,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *		 http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS
@@ -86,7 +86,7 @@ IncomingMessage.prototype.addHeaders = function(headers) {
 var createHTTPParser = function(incoming) {
   var parser = new HTTPParser(HTTPParser.RESPONSE);
   parser.incoming = incoming;
-  // cb during	http parsing from C side(http_parser)
+  // cb during http parsing from C side(http_parser)
   parser.OnHeaders = parserOnHeaders;
   parser.OnHeadersComplete = parserOnHeadersComplete;
   parser.OnBody = parserOnBody;
@@ -174,7 +174,7 @@ function parserOnMessageComplete() {
 
 // LIBCURL PARSER CALLBACKS
 
-// This is called by libcurl when Request is Done. Call the required stuff in parser.
+// Called by libcurl when Request is Done. Finish parser and unref
 function cbOnEnd() {
   console.log('in cbOnEnd ');
   var incoming = this;
@@ -220,7 +220,7 @@ function cbOnClosed() {
 
 }
 
-// This is called by libcurl when Message is complete. Call the required stuff in parser.
+// Called by libcurl when Request is Done. Finish parser and unref
 function cbOnData(chunk) {
   console.log('In cbOnData JS callback with chunk\n' + chunk + 'End chunk');
 
@@ -237,7 +237,7 @@ function cbOnData(chunk) {
   var ret = parser.execute(chunk);
 
   if (ret instanceof Error) {
-    console.log('ERRRORRR :( :( Code -	' + ret.code);
+    console.log('ERRRORRR :( :( Code - ' + ret.code);
     // unref all links to parser, make parser GCed
     parser = null;
     clientRequest.onError(ret);

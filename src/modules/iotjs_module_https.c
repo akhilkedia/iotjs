@@ -4,7 +4,7 @@
  * you may not use this file except in compliance with the License.
  * You may obtain a copy of the License at
  *
- *		 http://www.apache.org/licenses/LICENSE-2.0
+ *     http://www.apache.org/licenses/LICENSE-2.0
  *
  * Unless required by applicable law or agreed to in writing, software
  * distributed under the License is distributed on an "AS IS" BASIS
@@ -22,15 +22,16 @@
 #include <stdlib.h>
 #include <string.h>
 
-/*
-static void https_jthis_native_destroy(void* nativep){
-        iotjs_https_t* https_data = (iotjs_https_t*) nativep;
-        printf("destroyed native jthis\n");
+static void https_jthis_native_destroy(void* nativep) {
+  iotjs_https_t* https_data = (iotjs_https_t*)nativep;
+  IOTJS_RELEASE(https_data);
+  printf("destroyed native jthis\n");
 }
 
-static const jerry_object_native_info_t temp_native_info = { .free_cb =
-(jerry_object_native_free_callback_t) https_jthis_native_destroy } ;
-*/
+static const jerry_object_native_info_t temp_native_info = {
+  .free_cb = (jerry_object_native_free_callback_t)https_jthis_native_destroy
+};
+
 // Constructor
 iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
                                   const char* ca, const char* cert,
@@ -61,7 +62,7 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
   else
     printf(
         "Request method is not valid. Valid options are GET, POST, PUT, "
-        "DELETE, HEAD");  // TODO: cleanup and gracefully exit.
+        "DELETE, HEAD"); // TODO: cleanup and gracefully exit.
 
   // TLS certs stuff
   _this->ca = ca;
@@ -73,13 +74,13 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
   // Handles
   _this->loop = iotjs_environment_loop(iotjs_environment_get());
   _this->jthis_native = iotjs_jval_create_copied(jthis);
-  iotjs_jval_set_object_native_handle(&(_this->jthis_native), (uintptr_t)_this,
-                                      NULL);
+  iotjs_jval_set_object_native_handle(&(_this->jthis_native),
+                                      (uintptr_t)https_data, &temp_native_info);
   _this->curl_multi_handle = curl_multi_init();
   _this->curl_easy_handle = curl_easy_init();
   _this->timeout.data = (void*)https_data;
   uv_timer_init(_this->loop, &(_this->timeout));
-  _this->poll_handle_destroyed = false;
+  _this->poll_handle_to_be_destroyed = false;
 
   // Timeout stuff
   _this->timeout_ms = -1;
@@ -108,22 +109,23 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
 // Destructor
 void iotjs_https_destroy(iotjs_https_t* https_data) {
   printf("Destroying iotjs_https_t \n");
-  IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
+  // IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
+  IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
 
   curl_multi_cleanup(_this->curl_multi_handle);
   uv_close((uv_handle_t*)&(_this->timeout), NULL);
   uv_close((uv_handle_t*)&(_this->socket_timeout), NULL);
   uv_close((uv_handle_t*)&(_this->async_read_onwrite), NULL);
 
-  if (!_this->poll_handle_destroyed) {
+  if (_this->poll_handle_to_be_destroyed) {
     uv_poll_stop(&_this->poll_handle);
-    uv_close((uv_handle_t*)&_this->poll_handle, NULL);
-    _this->poll_handle_destroyed = true;
+    uv_close((uv_handle_t*)&(_this->poll_handle), NULL);
+    _this->poll_handle_to_be_destroyed = false;
   }
   curl_slist_free_all(_this->header_list);
 
   iotjs_jval_destroy(&_this->jthis_native);
-  IOTJS_RELEASE(https_data);
+  // IOTJS_RELEASE(https_data);
   return;
 }
 
@@ -159,7 +161,8 @@ void iotjs_https_call_read_onwrite(uv_timer_t* timer) {
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
 
   uv_timer_stop(&(_this->async_read_onwrite));
-  if (iotjs_jval_is_null(&_this->jthis_native)) return;
+  if (iotjs_jval_is_null(&_this->jthis_native))
+    return;
   const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
   const iotjs_jval_t* jthis = &(_this->jthis_native);
   IOTJS_ASSERT(iotjs_jval_is_function(&(_this->read_onwrite)));
@@ -211,7 +214,8 @@ size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
     size_t chunk_size = iotjs_string_size(&(_this->read_chunk));
     size_t left_to_copy_size = chunk_size - _this->cur_read_index;
 
-    if (real_size < 1) return 0;
+    if (real_size < 1)
+      return 0;
 
     // send some data
     if (_this->cur_read_index < chunk_size) {
@@ -266,7 +270,8 @@ size_t iotjs_https_curl_write_callback(void* contents, size_t size,
   }
 
   // TODO: Separate this out in a different function
-  if (iotjs_jval_is_null(&_this->jthis_native)) return 0;
+  if (iotjs_jval_is_null(&_this->jthis_native))
+    return 0;
   iotjs_jargs_t jarg = iotjs_jargs_create(1);
   iotjs_jval_t jresult_arr = iotjs_jval_create_byte_array(real_size, contents);
   iotjs_string_t jresult_string =
@@ -324,6 +329,7 @@ void iotjs_https_check_done(iotjs_https_t* https_data) {
     curl_easy_cleanup(message->easy_handle);
     _this->curl_easy_handle = NULL;
     iotjs_https_destroy(https_data);
+    break;
   }
 }
 
@@ -337,9 +343,12 @@ void iotjs_https_uv_poll_callback(uv_poll_t* poll, int status, int events) {
   int running_handles;
 
   int flags = 0;
-  if (status < 0) flags = CURL_CSELECT_ERR;
-  if (!status && events & UV_READABLE) flags |= CURL_CSELECT_IN;
-  if (!status && events & UV_WRITABLE) flags |= CURL_CSELECT_OUT;
+  if (status < 0)
+    flags = CURL_CSELECT_ERR;
+  if (!status && events & UV_READABLE)
+    flags |= CURL_CSELECT_IN;
+  if (!status && events & UV_WRITABLE)
+    flags |= CURL_CSELECT_OUT;
 
   curl_multi_socket_action(_this->curl_multi_handle, _this->sockfd, flags,
                            &running_handles);
@@ -405,7 +414,8 @@ static void iotjs_https_uv_socket_timeout_callback(uv_timer_t* timer) {
 void iotjs_https_set_timeout(long ms, iotjs_https_t* https_data) {
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   // TODO: do I need to unref/close the timeout handle?
-  if (ms < 0) return;
+  if (ms < 0)
+    return;
   _this->timeout_ms = ms;
   // TODO: repeated timeouts
   uv_timer_start(&(_this->socket_timeout),
@@ -509,7 +519,7 @@ int iotjs_https_curl_start_timeout_callback(CURLM* multi, long timeout_ms,
   } else {
     if (timeout_ms == 0)
       timeout_ms =
-          1;  // 0 means directly call socket_action, but we'll do it in a bit
+          1; // 0 means directly call socket_action, but we'll do it in a bit
     if ((_this->timeout_ms != -1) && (timeout_ms > _this->timeout_ms))
       timeout_ms = _this->timeout_ms;
     uv_timer_start(&(_this->timeout), iotjs_https_uv_timeout_callback,
@@ -524,14 +534,15 @@ int iotjs_https_curl_socket_callback(CURL* easy, curl_socket_t sockfd,
   iotjs_https_t* https_data = (iotjs_https_t*)userp;
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   // if(_this->is_stream_writable){
-  //	printf("Unpaused in iotjs_https_curl_socket_callback \n");
-  //	curl_easy_pause(_this->curl_easy_handle, CURLPAUSE_CONT);
+  //    printf("Unpaused in iotjs_https_curl_socket_callback \n");
+  //    curl_easy_pause(_this->curl_easy_handle, CURLPAUSE_CONT);
   //}
   if (action == CURL_POLL_IN || action == CURL_POLL_OUT ||
       action == CURL_POLL_INOUT) {
     if (!socketp) {
       _this->sockfd = sockfd;
       uv_poll_init_socket(_this->loop, &_this->poll_handle, sockfd);
+      _this->poll_handle_to_be_destroyed = true;
       (&_this->poll_handle)->data = https_data;
       curl_multi_assign(_this->curl_multi_handle, sockfd, (void*)https_data);
     }
@@ -557,9 +568,11 @@ int iotjs_https_curl_socket_callback(CURL* easy, curl_socket_t sockfd,
       printf("in remove iotjs_https_curl_socket_callback \n");
       if (socketp) {
         printf("Leaving iotjs_https_curl_socket_callback POLL_REMOVE \n");
-        uv_poll_stop(&_this->poll_handle);
-        uv_close((uv_handle_t*)&_this->poll_handle, NULL);
-        _this->poll_handle_destroyed = true;
+        if (_this->poll_handle_to_be_destroyed) {
+          uv_poll_stop(&_this->poll_handle);
+          uv_close((uv_handle_t*)&_this->poll_handle, NULL);
+          _this->poll_handle_to_be_destroyed = false;
+        }
         curl_multi_assign(_this->curl_multi_handle, sockfd, NULL);
       }
       break;
@@ -577,10 +590,11 @@ void iotjs_https_initialize_curl_opts(iotjs_https_t* https_data) {
   curl_multi_setopt(_this->curl_multi_handle, CURLMOPT_SOCKETFUNCTION,
                     iotjs_https_curl_socket_callback);
   curl_multi_setopt(_this->curl_multi_handle, CURLMOPT_SOCKETDATA,
-                    (void*)_this);
+                    (void*)https_data);
   curl_multi_setopt(_this->curl_multi_handle, CURLMOPT_TIMERFUNCTION,
                     iotjs_https_curl_start_timeout_callback);
-  curl_multi_setopt(_this->curl_multi_handle, CURLMOPT_TIMERDATA, (void*)_this);
+  curl_multi_setopt(_this->curl_multi_handle, CURLMOPT_TIMERDATA,
+                    (void*)https_data);
 
   // TODO: Remove Verbose and Proxy
   curl_easy_setopt(_this->curl_easy_handle, CURLOPT_VERBOSE, 1L);
