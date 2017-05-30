@@ -24,6 +24,8 @@
 
 static void iotjs_https_jthis_destroy(void* nativep) {
   iotjs_https_t* https_data = (iotjs_https_t*)nativep;
+  IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
+  _this->URL = NULL;
   IOTJS_RELEASE(https_data);
   printf("destroyed native jthis\n");
 }
@@ -31,6 +33,30 @@ static void iotjs_https_jthis_destroy(void* nativep) {
 static const jerry_object_native_info_t native_info = {
   .free_cb = (jerry_object_native_free_callback_t)iotjs_https_jthis_destroy
 };
+
+iotjs_jval_t* iotjs_https_jthis_from_https(iotjs_https_t* https_data) {
+  IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+  return &(_this->jthis_native);
+}
+
+// Call any property of ClientRequest._Incoming
+void iotjs_https_jcallback(iotjs_https_t* https_data, const char* property,
+                           const iotjs_jargs_t* jarg) {
+  iotjs_jval_t* jthis = iotjs_https_jthis_from_https(https_data);
+  if (iotjs_jval_is_null(jthis))
+    return;
+
+  iotjs_jval_t jincoming =
+      iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING__INCOMING);
+  iotjs_jval_t cb = iotjs_jval_get_property(&jincoming, property);
+
+  IOTJS_ASSERT(iotjs_jval_is_function(&cb));
+  printf("Invoking CallBack To JS %s\n", property);
+  iotjs_make_callback(&cb, &jincoming, jarg);
+
+  iotjs_jval_destroy(&jincoming);
+  iotjs_jval_destroy(&cb);
+}
 
 // Constructor
 iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
@@ -81,6 +107,7 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
   _this->timeout.data = (void*)https_data;
   uv_timer_init(_this->loop, &(_this->timeout));
   _this->poll_handle_to_be_destroyed = false;
+  _this->request_done = false;
 
   // Timeout stuff
   _this->timeout_ms = -1;
@@ -109,27 +136,56 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
 // Destructor
 void iotjs_https_destroy(iotjs_https_t* https_data) {
   printf("Destroying iotjs_https_t \n");
-  IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
+  IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+  _this->loop = NULL;
 
-  curl_multi_cleanup(_this->curl_multi_handle);
+  uv_timer_stop(&(_this->socket_timeout));
   uv_close((uv_handle_t*)&(_this->timeout), NULL);
   uv_close((uv_handle_t*)&(_this->socket_timeout), NULL);
   uv_close((uv_handle_t*)&(_this->async_read_onwrite), NULL);
 
+  //TODO: Check all callbacks are done.
+  iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONEND,
+                        iotjs_jargs_get_empty());
+  iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONCLOSED,
+                        iotjs_jargs_get_empty());
+
+  curl_multi_remove_handle(_this->curl_multi_handle, _this->curl_easy_handle);
+  curl_easy_cleanup(_this->curl_easy_handle);
+  _this->curl_easy_handle = NULL;
+  curl_multi_cleanup(_this->curl_multi_handle);
+  _this->curl_multi_handle = NULL;
+
   if (_this->poll_handle_to_be_destroyed) {
+    printf("Stopping poll handle in iotjs_https_destroy");
     uv_poll_stop(&_this->poll_handle);
     uv_close((uv_handle_t*)&(_this->poll_handle), NULL);
     _this->poll_handle_to_be_destroyed = false;
   }
   curl_slist_free_all(_this->header_list);
 
-  if (_this->data_to_read) {
-    _this->data_to_read = false;
-    printf("about to destroy read_chunk \n");
-    iotjs_string_destroy(&(_this->read_chunk));
-  }
+  //if (_this->data_to_read) {
+  //  _this->data_to_read = false;
+  //  printf("about to destroy read_chunk \n");
+  //  iotjs_string_destroy(&(_this->read_chunk));
+  //}
+
   if (_this->to_destroy_read_onwrite) {
+    //TODO: separate into another function.
+    const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
+    const iotjs_jval_t* jthis = &(_this->jthis_native);
+    IOTJS_ASSERT(iotjs_jval_is_function(&(_this->read_onwrite)));
+
+    printf("Invoking CallBack To JS read_callback\n");
+    if (!iotjs_jval_is_undefined(&(_this->read_callback)))
+      iotjs_make_callback(&(_this->read_callback), jthis, jarg);
+
+    printf("Invoking CallBack To JS read_onwrite\n");
+    iotjs_make_callback(&(_this->read_onwrite), jthis, jarg);
+    printf("Exiting iotjs_https_call_read_onwrite\n");
     _this->to_destroy_read_onwrite = false;
+    printf("Destroying read_onwrite \n");
+    iotjs_string_destroy(&(_this->read_chunk));
     iotjs_jval_destroy(&(_this->read_onwrite));
     iotjs_jval_destroy(&(_this->read_callback));
   }
@@ -139,30 +195,8 @@ void iotjs_https_destroy(iotjs_https_t* https_data) {
   return;
 }
 
-iotjs_jval_t* iotjs_https_jthis_from_https(iotjs_https_t* https_data) {
-  IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
-  return &(_this->jthis_native);
-}
-
 // ------------Actual Functions ----------
-// Call any property of ClientRequest._Incoming
-void iotjs_https_jcallback(iotjs_https_t* https_data, const char* property,
-                           const iotjs_jargs_t* jarg) {
-  iotjs_jval_t* jthis = iotjs_https_jthis_from_https(https_data);
-  if (iotjs_jval_is_null(jthis))
-    return;
 
-  iotjs_jval_t jincoming =
-      iotjs_jval_get_property(jthis, IOTJS_MAGIC_STRING__INCOMING);
-  iotjs_jval_t cb = iotjs_jval_get_property(&jincoming, property);
-
-  IOTJS_ASSERT(iotjs_jval_is_function(&cb));
-  printf("Invoking CallBack To JS %s\n", property);
-  iotjs_make_callback(&cb, &jincoming, jarg);
-
-  iotjs_jval_destroy(&jincoming);
-  iotjs_jval_destroy(&cb);
-}
 
 // Call onWrite and callback after ClientRequest._write
 void iotjs_https_call_read_onwrite(uv_timer_t* timer) {
@@ -247,8 +281,6 @@ size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
     _this->cur_read_index = 0;
     _this->data_to_read = false;
      printf("about to destroy read_chunk \n");
-    iotjs_string_destroy(&(_this->read_chunk));
-    // TODO: call onWrite and callback
     iotjs_https_call_read_onwrite_async(https_data);
   }
 
@@ -257,13 +289,15 @@ size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
     printf("Pausing Read \n");
     return CURL_READFUNC_PAUSE;
   }
-
+/* TODO: Check is correct
   if (_this->to_destroy_read_onwrite) {
+    printf("Destroying read_onwrite \n");
     _this->to_destroy_read_onwrite = false;
+    iotjs_string_destroy(&(_this->read_chunk));
     iotjs_jval_destroy(&(_this->read_onwrite));
     iotjs_jval_destroy(&(_this->read_callback));
   }
-
+*/
 
   // All done, end the transfer
   printf("Exiting iotjs_https_curl_read_callback Finally\n\n");
@@ -335,15 +369,16 @@ void iotjs_https_check_done(iotjs_https_t* https_data) {
       iotjs_jargs_destroy(&jarg);
     }
     // TODO: Check what happens when a request is 404
-    uv_timer_stop(&(_this->socket_timeout));
-    iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONEND,
-                          iotjs_jargs_get_empty());
-    iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONCLOSED,
-                          iotjs_jargs_get_empty());
-    curl_multi_remove_handle(_this->curl_multi_handle, message->easy_handle);
-    curl_easy_cleanup(message->easy_handle);
-    _this->curl_easy_handle = NULL;
-    iotjs_https_destroy(https_data);
+    if (_this->stream_ended) {
+      iotjs_https_destroy(https_data);
+    }
+    else {
+      printf("Marking request as Done. \n");
+      if (_this->to_destroy_read_onwrite) {
+        iotjs_https_call_read_onwrite_async(https_data);
+      }
+      _this->request_done = true;
+    }
     break;
   }
 }
@@ -476,24 +511,29 @@ void iotjs_https_js_data_to_write(iotjs_https_t* https_data,
                                   const iotjs_jval_t* callback,
                                   const iotjs_jval_t* onwrite) {
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
-  _this->read_chunk = read_chunk;
-  _this->data_to_read = true;
 
   if (_this->to_destroy_read_onwrite) {
+    printf("Destroying read_onwrite \n");
     _this->to_destroy_read_onwrite = false;
+    iotjs_string_destroy(&(_this->read_chunk));
     iotjs_jval_destroy(&(_this->read_onwrite));
     iotjs_jval_destroy(&(_this->read_callback));
   }
 
+  _this->read_chunk = read_chunk;
+  _this->data_to_read = true;
+
   _this->read_callback = iotjs_jval_create_copied(callback);
   printf("Got read callback in _write \n");
-
   _this->read_onwrite = iotjs_jval_create_copied(onwrite);
   _this->to_destroy_read_onwrite = true;
   printf("Got onwrite callback in _write \n");
 
-  if (_this->is_stream_writable) {
-    printf("Unpaused _write \n");
+  if (_this->request_done) {
+    iotjs_https_call_read_onwrite_async(https_data);
+  }
+  else if (_this->is_stream_writable) {
+    printf("Unpaused in _write \n");
     curl_easy_pause(_this->curl_easy_handle, CURLPAUSE_CONT);
     uv_timer_stop(&(_this->timeout));
     uv_timer_start(&(_this->timeout), iotjs_https_uv_timeout_callback, 1, 0);
@@ -503,8 +543,10 @@ void iotjs_https_js_data_to_write(iotjs_https_t* https_data,
 void iotjs_https_finish_request(iotjs_https_t* https_data) {
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   _this->stream_ended = true;
-
-  if (_this->is_stream_writable) {
+  if (_this->request_done) {
+    iotjs_https_destroy(https_data);
+  }
+  else if (_this->is_stream_writable) {
     printf("4 \n");
     printf("Unpaused in iotjs_https_finish_request \n");
     curl_easy_pause(_this->curl_easy_handle, CURLPAUSE_CONT);
@@ -513,13 +555,10 @@ void iotjs_https_finish_request(iotjs_https_t* https_data) {
   }
 }
 
-void iotsj_https_abort(iotjs_https_t* https_data) {
-  IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
+void iotjs_https_abort(iotjs_https_t* https_data) {
+  //IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   // Should end and close events be fired here?
-  uv_timer_stop(&(_this->socket_timeout));
-  curl_multi_remove_handle(_this->curl_multi_handle, _this->curl_easy_handle);
-  curl_easy_cleanup(_this->curl_easy_handle);
-  _this->curl_easy_handle = NULL;
+  //TODO: Check all callbacks are called.
   iotjs_https_destroy(https_data);
 }
 
@@ -834,7 +873,7 @@ JHANDLER_FUNCTION(Abort) {
   const iotjs_jval_t* jthis = JHANDLER_GET_ARG(0, object);
   iotjs_https_t* https_data =
       (iotjs_https_t*)iotjs_jval_get_object_native_handle(jthis);
-  iotsj_https_abort(https_data);
+  iotjs_https_abort(https_data);
 
   printf("Leaving Abort \n");
   iotjs_jhandler_return_null(jhandler);

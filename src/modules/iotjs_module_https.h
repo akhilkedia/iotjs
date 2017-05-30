@@ -55,6 +55,7 @@ typedef struct {
   curl_socket_t sockfd;
   bool poll_handle_to_be_destroyed;
   int running_handles;
+  bool request_done;
 
   // For SetTimeOut
   uv_timer_t socket_timeout;
@@ -70,8 +71,8 @@ typedef struct {
   bool to_destroy_read_onwrite;
   iotjs_string_t read_chunk;
   iotjs_jval_t read_callback;
-  uv_timer_t async_read_onwrite;
   iotjs_jval_t read_onwrite;
+  uv_timer_t async_read_onwrite;
 
 } IOTJS_VALIDATED_STRUCT(iotjs_https_t);
 

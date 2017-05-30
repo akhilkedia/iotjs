@@ -79,10 +79,10 @@ ClientRequest.prototype.headersComplete = function() {
   var self = this;
   console.log('In Response CallBack. The host is - ');
   console.log(self.host);
-  if (self._cb) {
+  //if (self._cb) {
     console.log('calling response cb');
     self.emit('response', self._incoming);
-  }
+  //}
   var isHeadResponse = (self.method == 'HEAD');
   return isHeadResponse;
 };

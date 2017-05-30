@@ -29,6 +29,7 @@ var options = {
   path: '/',
   headers : {'Content-Length': message.length}
 };
+
 /*
 
 var server1 = http.createServer(function(request, response) {
@@ -62,10 +63,11 @@ var request1 = https.request(options, function(response) {
 request1.end(message);
 
 
+
 var server2 = http.createServer(function(request, response) {
   response.end();
 });
-server2.listen(3006, 5); */
+server2.listen(3006, 5);
 
 // Simple request with end callback.
 var isRequest2Finished = false;
@@ -73,22 +75,28 @@ options.port = 3006;
 var request2 = https.request(options);
 request2.end(message, function() {
   isRequest2Finished = true;
+  server2.close();
 });
-/*
-// Call the request2 end again to test the finish state.
-request2.end(message, function() {
-  // This clabback should never be called.
-  assert.equal(isRequest2Finished, false);
-});
-// Call the request2 end again to test the finish state.
-request2.end(message, function() {
-  // This clabback should never be called.
-  assert.equal(isRequest2Finished, false);
-});
-// Call the request2 end again to test the finish state.
-*/
 
-/*
+// Call the request2 end again to test the finish state.
+request2.end(message, function() {
+  // This clabback should never be called.
+  assert.equal(isRequest2Finished, false);
+});
+
+// Call the request2 end again to test the finish state.
+request2.end(message, function() {
+  // This clabback should never be called.
+  assert.equal(isRequest2Finished, false);
+});
+// Call the request2 end again to test the finish state.
+request2.end(message, function() {
+  // This clabback should never be called.
+  assert.equal(isRequest2Finished, false);
+});
+
+
+
 
 var server3 = http.createServer(function(request, response) {
   var str = '';
@@ -123,27 +131,6 @@ var request3 = https.request(options, function(response) {
 request3.end(new Buffer(message));
 
 
-// This test is to make sure that when the HTTP server
-// responds to a HEAD request, it does not send any body.
-var server4 = http.createServer(function(request, response) {
-  response.writeHead(200);
-  response.end();
-});
-server4.listen(3008, 5);
-
-var isRequest4Finished = false;
-var request4 = https.request({
-  method: 'HEAD',
-  port: 3008,
-  path: '/'
-}, function(response) {
-  response.on('end', function() {
-    isRequest4Finished = true;
-    assert.equal(response.statusCode, 200);
-    server4.close();
-  });
-});
-request4.end();
 
 
 // Write a header twice in the server response.
@@ -177,23 +164,27 @@ var request5 = https.request(options, function(response) {
   });
 });
 request5.end();
-
+*/
 
 // Test the IncomingMessage read function.
 var readRequest = https.request({
   host: 'localhost',
   port: 80,
   path: '/',
-  method: 'GET'
+  method: 'GET',
+  protocol: 'http:'
 });
-readRequest.end();
 readRequest.on('response', function(incomingMessage) {
+    console.log('------------------------------------In Response-------------------------');
   incomingMessage.on('readable', function() {
+    console.log('------------------------------------In Readable-------------------------');
     var inc = incomingMessage.read();
     assert.equal(inc instanceof Buffer, true);
     assert(inc.toString('utf8').length > 0);
   });
 });
+readRequest.end();
+
 
 
 process.on('exit', function() {
@@ -203,4 +194,3 @@ process.on('exit', function() {
   assert.equal(isRequest4Finished, true);
   assert.equal(isRequest5Finished, true);
 });
-*/
