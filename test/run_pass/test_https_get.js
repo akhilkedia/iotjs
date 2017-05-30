@@ -45,7 +45,7 @@ var getResponseHandler = function (res) {
 https.get(options, getResponseHandler);
 
 // 2. close server req
-var testMsg = 'test message';
+var testMsg = 'Hello IoT.js';
 var finalOptions = {
   method: 'POST',
   host: "httpbin.org",

@@ -24,27 +24,10 @@ var message = 'Hello IoT.js';
 // Options for further requests.
 var options = {
   method: 'POST',
-  protocol: 'http:',
-  port: 3005,
-  path: '/',
-  headers : {'Content-Length': message.length}
+  host: "httpbin.org",
+  path: '/post',
+  headers: {'Content-Length': message.length, 'Content-Type': 'application/json'}
 };
-
-/*
-
-var server1 = http.createServer(function(request, response) {
-  var str = '';
-
-  request.on('data', function (chunk) {
-    str += chunk.toString();
-  });
-
-  request.on('end', function() {
-    assert.equal(str, message);
-    response.end();
-  });
-});
-server1.listen(3005, 5);
 
 // Simple request with valid utf-8 message.
 var isRequest1Finished = false;
@@ -56,65 +39,41 @@ var request1 = https.request(options, function(response) {
   });
 
   response.on('end', function() {
+    var response = JSON.parse(str);
+    assert.equal(message, response['data']);
     isRequest1Finished = true;
-    server1.close();
   });
 });
 request1.end(message);
 
 
-
-var server2 = http.createServer(function(request, response) {
-  response.end();
-});
-server2.listen(3006, 5);
-
-// Simple request with end callback.
+// Simple request with multiple end callback.
 var isRequest2Finished = false;
-options.port = 3006;
-var request2 = https.request(options);
-request2.end(message, function() {
-  isRequest2Finished = true;
-  server2.close();
-});
-
-// Call the request2 end again to test the finish state.
-request2.end(message, function() {
-  // This clabback should never be called.
-  assert.equal(isRequest2Finished, false);
-});
-
-// Call the request2 end again to test the finish state.
-request2.end(message, function() {
-  // This clabback should never be called.
-  assert.equal(isRequest2Finished, false);
-});
-// Call the request2 end again to test the finish state.
-request2.end(message, function() {
-  // This clabback should never be called.
-  assert.equal(isRequest2Finished, false);
-});
-
-
-
-
-var server3 = http.createServer(function(request, response) {
+var request2 = https.request(options, function(response) {
   var str = '';
 
-  request.on('data', function(chunk) {
-    str += chunk;
+  response.on('data', function(chunk) {
+    str += chunk.toString();
   });
 
-  request.on('end', function() {
-    // Check if we got the proper message.
-    assert.equal(str, message);
-    response.end();
+  response.on('end', function() {
+    var response = JSON.parse(str);
+    assert.equal(message, response['data']);
   });
 });
-server3.listen(3007, 5);
+
+request2.end(message, function() {
+  isRequest2Finished = true;
+});
+
+// Call the request2 end again to test the finish state.
+request2.end(message, function() {
+  // This clabback should never be called.
+  assert.equal(isRequest2Finished, false);
+});
+
 
 // Simple request with buffer chunk as message parameter.
-options.port = 3007;
 var isRequest3Finished = false;
 var request3 = https.request(options, function(response) {
   var str = '';
@@ -124,67 +83,31 @@ var request3 = https.request(options, function(response) {
   });
 
   response.on('end', function() {
+    var response = JSON.parse(str);
+    assert.equal(message, response['data']);
     isRequest3Finished = true;
-    server3.close();
   });
 });
 request3.end(new Buffer(message));
 
 
-
-
-// Write a header twice in the server response.
-var server5 = http.createServer(function(request, response) {
-  var str = '';
-
-  request.on('data', function(chunk) {
-    str += chunk;
-  });
-
-  request.on('end', function() {
-    response.writeHead(200, 'OK', {'Connection' : 'close1'});
-    // Wrote the same head twice.
-    response.writeHead(200, 'OK', {'Connection' : 'close2'});
-    // Wrote a new head.
-    response.writeHead(200, {'Head' : 'Value'});
-    response.end();
-  });
-});
-server5.listen(3009, 5);
-
-options.port = 3009;
-options.headers = null;
-var isRequest5Finished = false;
-var request5 = https.request(options, function(response) {
-  response.on('end', function() {
-    isRequest5Finished = true;
-    assert.equal(response.headers['Connection'], 'close2');
-    assert.equal(response.headers['Head'], 'Value');
-    server5.close();
-  });
-});
-request5.end();
-*/
-
 // Test the IncomingMessage read function.
+var isRequest4Finished = false;
 var readRequest = https.request({
-  host: 'localhost',
-  port: 80,
-  path: '/',
   method: 'GET',
-  protocol: 'http:'
+  host: "httpbin.org",
+  path: '/get'
 });
+
 readRequest.on('response', function(incomingMessage) {
-    console.log('------------------------------------In Response-------------------------');
   incomingMessage.on('readable', function() {
-    console.log('------------------------------------In Readable-------------------------');
     var inc = incomingMessage.read();
     assert.equal(inc instanceof Buffer, true);
     assert(inc.toString('utf8').length > 0);
+    isRequest4Finished = true;
   });
 });
 readRequest.end();
-
 
 
 process.on('exit', function() {
@@ -192,5 +115,4 @@ process.on('exit', function() {
   assert.equal(isRequest2Finished, true);
   assert.equal(isRequest3Finished, true);
   assert.equal(isRequest4Finished, true);
-  assert.equal(isRequest5Finished, true);
 });
