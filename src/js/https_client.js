@@ -67,7 +67,6 @@ function ClientRequest(options, cb) {
 }
 
 util.inherits(ClientRequest, stream.Writable);
-exports.ClientRequest = ClientRequest;
 
 // Concrete stream overriding the empty underlying _write method.
 ClientRequest.prototype._write = function(chunk, callback, onwrite) {
@@ -97,25 +96,31 @@ ClientRequest.prototype.onFinish = function() {
 };
 
 ClientRequest.prototype.setTimeout = function(ms, cb) {
-  this.incoming.setTimeout(ms, cb);
+  console.log('In ClientRequest SetTimeout');
+  this._incoming.setTimeout(ms, cb);
 };
 
 ClientRequest.prototype.abort = function(doNotEmit) {
+  console.log('In ClientRequest abort()');
   if (!this.aborted) {
+    httpsNative.abort(this);
     var date = new Date();
     this.aborted = date.getTime();
-    httpsNative.abort(this);
+    console.log('In ClientRequest abort middle');
 
-    if (this.incoming.parser) {
-      this.incoming.parser.finish();
-      this.incoming.parser = null;
+    if (this._incoming.parser) {
+      this._incoming.parser.finish();
+      this._incoming.parser = null;
     }
+    console.log('In ClientRequest abort ending');
 
     if (!doNotEmit) {
       this.emit('abort');
     }
   }
 };
+
+exports.ClientRequest = ClientRequest;
 
 //Function for encoding options.auth
 function utf8Encode(string) {

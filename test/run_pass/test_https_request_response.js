@@ -26,7 +26,8 @@ var options = {
   method: 'POST',
   host: "httpbin.org",
   path: '/post',
-  headers: {'Content-Length': message.length, 'Content-Type': 'application/json'}
+  headers: {'Content-Length': message.length,
+    'Content-Type': 'application/json'}
 };
 
 // Simple request with valid utf-8 message.

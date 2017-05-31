@@ -17,6 +17,8 @@
 var assert = require('assert');
 var https = require('https');
 
+
+var isRequest1Finished = false;
 // 1. GET req
 options = {
   method: 'GET',
@@ -31,9 +33,9 @@ var getResponseHandler = function (res) {
   assert.equal(200, res.statusCode);
 
   var endHandler = function(){
-    // GET msg, no received bodys
     var response = JSON.parse(res_body);
     assert.equal('iotjs', response['user-agent']);
+    isRequest1Finished = true;
   };
   res.on('end', endHandler);
 
@@ -50,8 +52,10 @@ var finalOptions = {
   method: 'POST',
   host: "httpbin.org",
   path: '/post',
-  headers: {'Content-Length': testMsg.length, 'Content-Type': 'application/json'}
+  headers: {'Content-Length': testMsg.length,
+    'Content-Type': 'application/json'}
 };
+var isRequest2Finished = false;
 
 var finalResponseHandler = function (res) {
   var res_body = '';
@@ -61,6 +65,7 @@ var finalResponseHandler = function (res) {
   var endHandler = function(){
     var response = JSON.parse(res_body);
     assert.equal(testMsg, response['data']);
+    isRequest2Finished = true;
   };
   res.on('end', endHandler);
 
@@ -72,3 +77,9 @@ var finalResponseHandler = function (res) {
 var finalReq = https.request(finalOptions, finalResponseHandler);
 finalReq.write(testMsg);
 finalReq.end();
+
+
+process.on('exit', function() {
+  assert.equal(isRequest1Finished, true);
+  assert.equal(isRequest2Finished, true);
+});

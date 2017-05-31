@@ -27,6 +27,7 @@ function IncomingMessage(clientRequest) {
   this.headers = {};
   this.started = false;
   this.completed = false;
+  this.timeoutCallback = null;
   // for response (client)
   this.statusCode = null;
   this.statusMessage = null;
@@ -55,11 +56,9 @@ IncomingMessage.prototype.read = function(n) {
 
 IncomingMessage.prototype.setTimeout = function(ms, cb) {
   if (cb) {
+    this.timeoutCallback = cb;
     this.once('timeout', cb);
-  } else {
-    this.once('timeout', this.clientRequest.abort);
   }
-
   httpsNative.setTimeout(ms, this.clientRequest);
 };
 
@@ -190,7 +189,7 @@ function cbOnEnd() {
 
 // TODO: Verify - First end, then close.
 function cbOnClosed() {
-  console.log('in cbOnClose ');
+  console.log('in cbOnClosed ');
   var incoming = this;
   var parser = incoming.parser;
   var clientRequest = incoming.clientRequest;
@@ -204,8 +203,8 @@ function cbOnClosed() {
     incoming.push(null);
   } else if (!incoming.started) {
     // socket closed before response starts.
-    var err = new Error('Could Not Start Connection');
-    incoming.emit('error', err);
+    //var err = new Error('Could Not Start Connection');
+    //incoming.emit('error', err);
   } else {
     incoming.emit('close');
     clientRequest.emit('close');
@@ -257,9 +256,14 @@ function cbOnError(er) {
 }
 
 function cbOnTimeout() {
-  console.log('Timeout');
+  console.log('In cbOnTimeout');
   var incoming = this;
+  var clientRequest = incoming.clientRequest;
   incoming.emit('timeout');
+  if (!incoming.timeoutCallback) {
+    clientRequest.abort.call(clientRequest, false);
+  }
+  incoming.emit('aborted');
 }
 
 function cbOnSocket() {
