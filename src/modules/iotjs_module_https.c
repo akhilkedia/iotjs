@@ -22,7 +22,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static void iotjs_https_jthis_destroy(void* nativep) {
+static void iotjs_https_destroy(void* nativep) {
   iotjs_https_t* https_data = (iotjs_https_t*)nativep;
   IOTJS_VALIDATED_STRUCT_DESTRUCTOR(iotjs_https_t, https_data);
   // To shutup unused variable _this warning
@@ -32,7 +32,7 @@ static void iotjs_https_jthis_destroy(void* nativep) {
 }
 
 static const jerry_object_native_info_t native_info = {
-  .free_cb = (jerry_object_native_free_callback_t)iotjs_https_jthis_destroy
+  .free_cb = (jerry_object_native_free_callback_t)iotjs_https_destroy
 };
 
 iotjs_jval_t* iotjs_https_jthis_from_https(iotjs_https_t* https_data) {
@@ -86,10 +86,9 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
     _this->method = HTTPS_OPTIONS;
   else if (strcmp(method, "TRACE") == 0)
     _this->method = HTTPS_TRACE;
-  else
-    printf(
-        "Request method is not valid. Valid options are GET, POST, PUT, "
-        "DELETE, HEAD"); // TODO: cleanup and gracefully exit.
+  else {
+    //Will never reach here cuz checked in JS
+  }
 
   // TLS certs stuff
   _this->ca = ca;
@@ -135,7 +134,7 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
 }
 
 // Destructor
-void iotjs_https_destroy(iotjs_https_t* https_data) {
+void iotjs_https_cleanup(iotjs_https_t* https_data) {
   printf("Destroying iotjs_https_t \n");
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   _this->loop = NULL;
@@ -145,7 +144,6 @@ void iotjs_https_destroy(iotjs_https_t* https_data) {
   uv_close((uv_handle_t*)&(_this->socket_timeout), NULL);
   uv_close((uv_handle_t*)&(_this->async_read_onwrite), NULL);
 
-  // TODO: Check all callbacks are done.
   iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONEND,
                         iotjs_jargs_get_empty());
   iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONCLOSED,
@@ -158,7 +156,7 @@ void iotjs_https_destroy(iotjs_https_t* https_data) {
   _this->curl_multi_handle = NULL;
 
   if (_this->poll_handle_to_be_destroyed) {
-    printf("Stopping poll handle in iotjs_https_destroy");
+    printf("Stopping poll handle in iotjs_https_cleanup");
     uv_poll_stop(&_this->poll_handle);
     uv_close((uv_handle_t*)&(_this->poll_handle), NULL);
     _this->poll_handle_to_be_destroyed = false;
@@ -232,8 +230,6 @@ void iotjs_https_call_read_onwrite_async(iotjs_https_t* https_data) {
 int iotjs_https_curl_sockopt_callback(void* userp, curl_socket_t curlfd,
                                       curlsocktype purpose) {
   iotjs_https_t* https_data = (iotjs_https_t*)userp;
-  // TODO: this if is probably never needed
-  // if(purpose == CURLSOCKTYPE_IPCXN)
   iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONSOCKET,
                         iotjs_jargs_get_empty());
   return CURL_SOCKOPT_OK;
@@ -290,15 +286,6 @@ size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
     printf("Pausing Read \n");
     return CURL_READFUNC_PAUSE;
   }
-  /* TODO: Check is correct
-    if (_this->to_destroy_read_onwrite) {
-      printf("Destroying read_onwrite \n");
-      _this->to_destroy_read_onwrite = false;
-      iotjs_string_destroy(&(_this->read_chunk));
-      iotjs_jval_destroy(&(_this->read_onwrite));
-      iotjs_jval_destroy(&(_this->read_callback));
-    }
-  */
 
   // All done, end the transfer
   printf("Exiting iotjs_https_curl_read_callback Finally\n\n");
@@ -371,7 +358,7 @@ void iotjs_https_check_done(iotjs_https_t* https_data) {
     }
     // TODO: Check what happens when a request is 404
     if (_this->stream_ended) {
-      iotjs_https_destroy(https_data);
+      iotjs_https_cleanup(https_data);
     } else {
       printf("Marking request as Done. \n");
       if (_this->to_destroy_read_onwrite) {
@@ -387,9 +374,6 @@ void iotjs_https_uv_poll_callback(uv_poll_t* poll, int status, int events) {
   iotjs_https_t* https_data = (iotjs_https_t*)poll->data;
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   printf("Entered in iotjs_https_uv_poll_callback \n");
-
-  // TODO: Do we need this?
-  // uv_timer_stop(&(_this->timeout));
 
   int flags = 0;
   if (status < 0)
@@ -410,7 +394,6 @@ void iotjs_https_uv_poll_callback(uv_poll_t* poll, int status, int events) {
 // This function is for signalling to curl timeout has passed.
 // This timeout is usually given by curl itself.
 static void iotjs_https_uv_timeout_callback(uv_timer_t* timer) {
-  // TODO: do I need to unref/close the timeout handle?
   iotjs_https_t* https_data = (iotjs_https_t*)(timer->data);
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   uv_timer_stop(timer);
@@ -421,7 +404,6 @@ static void iotjs_https_uv_timeout_callback(uv_timer_t* timer) {
 }
 
 static void iotjs_https_uv_socket_timeout_callback(uv_timer_t* timer) {
-  // TODO: do I need to unref/close the timeout handle?
   iotjs_https_t* https_data = (iotjs_https_t*)(timer->data);
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   double download_bytes = 0;
@@ -463,7 +445,6 @@ static void iotjs_https_uv_socket_timeout_callback(uv_timer_t* timer) {
 
 void iotjs_https_set_timeout(long ms, iotjs_https_t* https_data) {
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
-  // TODO: do I need to unref/close the timeout handle?
   if (ms < 0)
     return;
   _this->timeout_ms = ms;
@@ -544,7 +525,7 @@ void iotjs_https_finish_request(iotjs_https_t* https_data) {
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   _this->stream_ended = true;
   if (_this->request_done) {
-    iotjs_https_destroy(https_data);
+    iotjs_https_cleanup(https_data);
   } else if (_this->is_stream_writable) {
     printf("4 \n");
     printf("Unpaused in iotjs_https_finish_request \n");
@@ -555,10 +536,7 @@ void iotjs_https_finish_request(iotjs_https_t* https_data) {
 }
 
 void iotjs_https_abort(iotjs_https_t* https_data) {
-  // IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
-  // Should end and close events be fired here?
-  // TODO: Check all callbacks are called.
-  iotjs_https_destroy(https_data);
+  iotjs_https_cleanup(https_data);
 }
 
 int iotjs_https_curl_start_timeout_callback(CURLM* multi, long timeout_ms,
@@ -718,10 +696,7 @@ void iotjs_https_initialize_curl_opts(iotjs_https_t* https_data) {
       break;
   }
 
-  // TODO: Proxy support is applicable from libcurl version 7.54.0. Current
-  // headless version is 7.53.1
-  // curl_easy_setopt(handle, CURLOPT_PROXY, "http://10.112.1.184:8080/");
-  // curl_easy_setopt(handle, CURLOPT_SUPPRESS_CONNECT_HEADERS, 1L);
+  // TODO: Uncomment below for chunked encoding, probably
   // curl_easy_setopt(_this->curl_easy_handle, CURLOPT_HTTP_TRANSFER_DECODING,
   // 0L);
 

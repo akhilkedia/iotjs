@@ -18,6 +18,10 @@ var incoming = require('https_incoming');
 var stream = require('stream');
 var httpsNative = process.binding(process.binding.https);
 
+var methods = {'0': 'DELETE', '1': 'GET', '2': 'HEAD', '3': 'POST',
+    '4': 'PUT', '5': 'CONNECT', '6': 'OPTIONS', '7': 'TRACE'};
+exports.METHODS = methods;
+
 function ClientRequest(options, cb) {
   console.log('ClientRequest constructor');
   this.stream = stream.Writable.call(this, options);
@@ -34,6 +38,21 @@ function ClientRequest(options, cb) {
   this.cert = options.cert || '';
   this.key = options.key || '';
 
+  var isMethodGood = false;
+  for (var key in methods) {
+    if (methods.hasOwnProperty(key)) {
+      if(this.method == methods[key]) {
+        isMethodGood = true;
+      }
+    }
+  }
+
+  if(!isMethodGood) {
+    var err = new Error('Incorrect options.method.')
+    this.emit('error', err);
+    return;
+  }
+
   console.log('About to call IncomingMessage Constructor');
   this._incoming = new incoming.IncomingMessage(this);
   this._incoming.url = this.host;
@@ -42,7 +61,6 @@ function ClientRequest(options, cb) {
 
   // Register response event handler.
   if (cb) {
-    this._cb = cb;
     this.once('response', cb);
   }
   this.once('finish', this.onFinish);
@@ -78,10 +96,8 @@ ClientRequest.prototype.headersComplete = function() {
   var self = this;
   console.log('In Response CallBack. The host is - ');
   console.log(self.host);
-  //if (self._cb) {
-    console.log('calling response cb');
-    self.emit('response', self._incoming);
-  //}
+  console.log('calling response cb');
+  self.emit('response', self._incoming);
   var isHeadResponse = (self.method == 'HEAD');
   return isHeadResponse;
 };

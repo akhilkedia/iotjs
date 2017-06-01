@@ -59,8 +59,6 @@ var req1 = https.request(options, getResponseHandler);
 //Note - END MUST BE CALLED!!!!!!
 req1.end();
 
-
-
 //************ Request 2 ************
 options2 = {
   method: 'POST',

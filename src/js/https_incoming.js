@@ -187,7 +187,6 @@ function cbOnEnd() {
 
 }
 
-// TODO: Verify - First end, then close.
 function cbOnClosed() {
   console.log('in cbOnClosed ');
   var incoming = this;
@@ -202,11 +201,12 @@ function cbOnClosed() {
     });
     incoming.push(null);
   } else if (!incoming.started) {
-    // socket closed before response starts.
-    //var err = new Error('Could Not Start Connection');
-    //incoming.emit('error', err);
-  } else {
     incoming.emit('close');
+    clientRequest.emit('close');
+    // socket closed before response starts.
+    var err = new Error('Could Not Start Connection');
+    incoming.emit('error', err);
+  } else {
     clientRequest.emit('close');
   }
 
