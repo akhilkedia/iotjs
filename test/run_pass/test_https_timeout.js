@@ -24,8 +24,11 @@ options = {
   path: '/delay/10'
 };
 
-var timeouted = false;
 var getReq = https.get(options);
+
+getReq.on('error', function(){});
+
+var timeouted = false;
 getReq.setTimeout(5000, function() {
   timeouted = true;
   getReq.abort();

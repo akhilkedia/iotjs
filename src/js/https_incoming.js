@@ -73,7 +73,6 @@ IncomingMessage.prototype.addHeaders = function(headers) {
   }
   console.log('Why1 ');
 
-  //TODO: handle headers as array if array C API is done.
   for (var i = 0; i < headers.length; i = i + 2) {
     console.log('Why2 ');
     this.headers[headers[i]] = headers[i + 1];
@@ -100,9 +99,7 @@ var createHTTPParser = function(incoming) {
 function parserOnHeaders(headers, url) {
   console.log('in parserOnHeaders ');
   var parser = this;
-  // TODO: This should be impl. with Array.concat
   parser.incoming.addHeaders(headers);
-  //AddHeader(this._headers, headers);
   console.log('leaving parserOnHeaders ');
 
 }
@@ -119,7 +116,6 @@ function parserOnHeadersComplete(info) {
     headers = parser._headers;
     console.log('Here0.5 ');
     parser.incoming.addHeaders(headers);
-    // TODO: This should be impl. with Array
     parser._headers = {};
   } else {
     parser.incoming.addHeaders(headers);
@@ -205,7 +201,7 @@ function cbOnClosed() {
     clientRequest.emit('close');
     // socket closed before response starts.
     var err = new Error('Could Not Start Connection');
-    incoming.emit('error', err);
+    clientRequest.onError(err);
   } else {
     clientRequest.emit('close');
   }
@@ -221,6 +217,7 @@ function cbOnClosed() {
 
 // Called by libcurl when Request is Done. Finish parser and unref
 function cbOnData(chunk) {
+  console.log('In cbOnData JS');
   console.log('In cbOnData JS callback with chunk\n' + chunk + 'End chunk');
 
   var incoming = this;

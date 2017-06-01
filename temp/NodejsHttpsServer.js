@@ -27,10 +27,11 @@ const options = {
 };
 
 var server = https.createServer(options, function(req, res) {
+  server.close();
   var body = 'Hello World!!!!! :D :D :D \n';
   console.log('Received a request!');
-  res.writeHead(200, {'Connection': 'close', 'Content-Length': body.length});
-  res.end(body);
+  //res.writeHead(200, {'Connection': 'close', 'Content-Length': body.length});
+  //res.end(body);
   console.log('Sent Response!');
 });
 

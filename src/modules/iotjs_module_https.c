@@ -170,7 +170,6 @@ void iotjs_https_cleanup(iotjs_https_t* https_data) {
   //}
 
   if (_this->to_destroy_read_onwrite) {
-    // TODO: separate into another function.
     const iotjs_jargs_t* jarg = iotjs_jargs_get_empty();
     const iotjs_jval_t* jthis = &(_this->jthis_native);
     IOTJS_ASSERT(iotjs_jval_is_function(&(_this->read_onwrite)));
@@ -299,12 +298,6 @@ size_t iotjs_https_curl_write_callback(void* contents, size_t size,
   size_t real_size = size * nmemb;
   printf("Entered iotjs_https_curl_write_callback \n");
 
-  // TODO: Verify that commenting out below doesnt break chunked encoding.
-  // if (!_this->stream_ended || _this->data_to_read) {
-  // printf("Pausing Write \n");
-  // return CURL_WRITEFUNC_PAUSE;
-  //}
-
   printf("Here1 iotjs_https_curl_write_callback\n");
   if (iotjs_jval_is_null(&_this->jthis_native))
     return 0;
@@ -314,8 +307,8 @@ size_t iotjs_https_curl_write_callback(void* contents, size_t size,
       iotjs_string_create_with_size(contents, real_size);
   iotjs_jargs_append_string(&jarg, &jresult_string);
   // TODO: Use the jresult_arr Byte Array in production, but in testing use
-  // string.
-  // iotjs_jargs_append_jval(&jarg, &jresult_arr);
+  // string. Comment out above line.
+  //iotjs_jargs_append_jval(&jarg, &jresult_arr);
 
   iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONDATA, &jarg);
 
@@ -348,7 +341,6 @@ void iotjs_https_check_done(iotjs_https_t* https_data) {
     if (error) {
       iotjs_jargs_t jarg = iotjs_jargs_create(1);
       char error[] = "Unknown Error has occured.";
-      // TODO: perhaps the exit code should be attached here
       iotjs_string_t jresult_string =
           iotjs_string_create_with_size(error, strlen(error));
       iotjs_jargs_append_string(&jarg, &jresult_string);
@@ -356,7 +348,6 @@ void iotjs_https_check_done(iotjs_https_t* https_data) {
       iotjs_string_destroy(&jresult_string);
       iotjs_jargs_destroy(&jarg);
     }
-    // TODO: Check what happens when a request is 404
     if (_this->stream_ended) {
       iotjs_https_cleanup(https_data);
     } else {
@@ -431,9 +422,10 @@ static void iotjs_https_uv_socket_timeout_callback(uv_timer_t* timer) {
       printf("Got inside first if \n \n");
       if (total_time_ms >
           ((uint64_t)_this->timeout_ms + _this->last_bytes_time)) {
-        // TODO: Handle the case when request is already over
-        iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONTIMEOUT,
-                              iotjs_jargs_get_empty());
+        if (!_this->request_done) {
+          iotjs_https_jcallback(https_data, IOTJS_MAGIC_STRING_ONTIMEOUT,
+                                iotjs_jargs_get_empty());
+        }
         uv_timer_stop(&(_this->socket_timeout));
       }
     } else {
@@ -448,7 +440,6 @@ void iotjs_https_set_timeout(long ms, iotjs_https_t* https_data) {
   if (ms < 0)
     return;
   _this->timeout_ms = ms;
-  // TODO: repeated timeouts
   uv_timer_start(&(_this->socket_timeout),
                  iotjs_https_uv_socket_timeout_callback, 1, (uint64_t)ms);
 
@@ -654,6 +645,7 @@ void iotjs_https_initialize_curl_opts(iotjs_https_t* https_data) {
 
   curl_easy_setopt(_this->curl_easy_handle, CURLOPT_URL, _this->URL);
   _this->URL = NULL;
+  curl_easy_setopt(_this->curl_easy_handle, CURLOPT_PROTOCOLS, CURLPROTO_HTTP|CURLPROTO_HTTPS);
 
   if (strlen(_this->ca) > 0)
     curl_easy_setopt(_this->curl_easy_handle, CURLOPT_CAINFO, _this->ca);
@@ -696,9 +688,7 @@ void iotjs_https_initialize_curl_opts(iotjs_https_t* https_data) {
       break;
   }
 
-  // TODO: Uncomment below for chunked encoding, probably
-  // curl_easy_setopt(_this->curl_easy_handle, CURLOPT_HTTP_TRANSFER_DECODING,
-  // 0L);
+  curl_easy_setopt(_this->curl_easy_handle, CURLOPT_HTTP_TRANSFER_DECODING, 0L);
 
   printf("Set Most Curl Opts \n");
 }

@@ -28,19 +28,20 @@ console.log('akhil-test begin');
 //************Request 1 ************
 options = {
   method: 'GET',
-  //host: "eu.httpbin.org",
-  host: 'localhost',
-  path: '/',
-  port: 4443,
+  host: "eu.httpbin.org",
+  //host: 'localhost',
+  path: '/get',
+  //port: 4443,
   headers: {'Content-Type': 'application/json', 'cache-control': 'no-cache'},
-  ca: './temp/certs/ca.pem',
-  cert: './temp/certs/client.pem',
-  key: './temp/certs/client.key'
+  //ca: './temp/certs/ca.pem',
+  //cert: './temp/certs/client.pem',
+  //key: './temp/certs/client.key'
 };
 
 var resBody = '';
 var getResponseHandler = function(res) {
   console.log('Got RESPONSE Callback!');
+  console.log('Response status code ' + res.statusCode);
 
   res.on('data', function(chunk) {
     console.log('Got Data Callback!');
@@ -59,6 +60,7 @@ var req1 = https.request(options, getResponseHandler);
 //Note - END MUST BE CALLED!!!!!!
 req1.end();
 
+/*
 //************ Request 2 ************
 options2 = {
   method: 'POST',
@@ -138,4 +140,4 @@ req2.write('}');
 //Note - END MUST BE CALLED!!!!!!
 req2.end();
 
-console.log('Hello End');
+console.log('Hello End'); */
