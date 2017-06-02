@@ -53,8 +53,9 @@ typedef struct {
   // Curl Context
   uv_poll_t poll_handle;
   curl_socket_t sockfd;
-  bool poll_handle_to_be_destroyed;
   int running_handles;
+  int closing_handles;
+  bool poll_handle_to_be_destroyed;
   bool request_done;
 
   // For SetTimeOut

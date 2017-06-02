@@ -223,7 +223,7 @@ function cbOnData(chunk) {
   var incoming = this;
 
   if (!incoming) {
-    return;
+    return false;
   }
 
   var parser = incoming.parser;
@@ -234,12 +234,17 @@ function cbOnData(chunk) {
 
   if (ret instanceof Error) {
     console.log('ERRRORRR :( :( Code - ' + ret.code);
+    parser.finish();
     // unref all links to parser, make parser GCed
     parser = null;
     clientRequest.onError(ret);
-    clientRequest.abort(true);
+    //TODO:
+    //clientRequest.abort(true);
+    console.log('exiting cbOnData');
+    return false;
   }
   console.log('exiting cbOnData');
+  return true;
 }
 
 function cbOnError(er) {
