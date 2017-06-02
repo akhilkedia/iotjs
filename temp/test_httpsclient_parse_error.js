@@ -36,7 +36,7 @@ var request = https.request({
   path: '/'
 });
 request.on('error', function(err) {
-  console.log('---------------------------------------------------------------'+err);
+  console.log('Error: '+err);
   errors++;
 });
 request.end();
