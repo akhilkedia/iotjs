@@ -91,31 +91,28 @@ iotjs_https_t* iotjs_https_create(const char* URL, const char* method,
                                   const char* key, const iotjs_jval_t* jthis);
 
 #define THIS iotjs_https_t* https_data
-//Some utility functions
-void iotjs_https_initialize_curl_opts(THIS);
+// Some utility functions
 void iotjs_https_check_done(THIS);
 void iotjs_https_cleanup(THIS);
+void iotjs_https_initialize_curl_opts(THIS);
 iotjs_jval_t* iotjs_https_jthis_from_https(THIS);
 bool iotjs_https_jcallback(THIS, const char* property,
                            const iotjs_jargs_t* jarg, bool resultvalue);
 void iotjs_https_call_read_onwrite(uv_timer_t* timer);
 void iotjs_https_call_read_onwrite_async(THIS);
 
-//Functions almost directly called by JS via JHANDLER
-void iotjs_https_abort(THIS);
-void iotjs_https_add_header(THIS,
-                            const char* char_header);
-void iotjs_https_data_to_write(THIS,
-                                  iotjs_string_t read_chunk,
-                                  const iotjs_jval_t* callback,
-                                  const iotjs_jval_t* onwrite);
+// Functions almost directly called by JS via JHANDLER
+void iotjs_https_add_header(THIS, const char* char_header);
+void iotjs_https_data_to_write(THIS, iotjs_string_t read_chunk,
+                               const iotjs_jval_t* callback,
+                               const iotjs_jval_t* onwrite);
 void iotjs_https_finish_request(THIS);
 void iotjs_https_send_request(THIS);
 void iotjs_https_set_timeout(long ms, THIS);
 #undef THIS
 
 
-//CURL callbacks
+// CURL callbacks
 size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
                                       void* userp);
 int iotjs_https_curl_socket_callback(CURL* easy, curl_socket_t sockfd,
@@ -127,7 +124,7 @@ int iotjs_https_curl_start_timeout_callback(CURLM* multi, long timeout_ms,
 size_t iotjs_https_curl_write_callback(void* contents, size_t size,
                                        size_t nmemb, void* userp);
 
-//UV Callbacks
+// UV Callbacks
 void iotjs_https_uv_close_callback(uv_handle_t* handle);
 void iotjs_https_uv_poll_callback(uv_poll_t* poll, int status, int events);
 void iotjs_https_uv_socket_timeout_callback(uv_timer_t* timer);

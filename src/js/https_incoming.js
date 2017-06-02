@@ -238,8 +238,6 @@ function cbOnData(chunk) {
     // unref all links to parser, make parser GCed
     parser = null;
     clientRequest.onError(ret);
-    //TODO:
-    //clientRequest.abort(true);
     console.log('exiting cbOnData');
     return false;
   }
