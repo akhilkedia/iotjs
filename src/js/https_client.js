@@ -103,6 +103,7 @@ ClientRequest.prototype.headersComplete = function() {
 };
 
 ClientRequest.prototype.onError = function(ret) {
+  console.log('In ClientRequest OnError');
   this.emit('error', ret);
 };
 

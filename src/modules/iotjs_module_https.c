@@ -534,7 +534,7 @@ size_t iotjs_https_curl_read_callback(void* contents, size_t size, size_t nmemb,
 // Curl signalling via fd sockets
 int iotjs_https_curl_socket_callback(CURL* easy, curl_socket_t sockfd,
                                      int action, void* userp, void* socketp) {
-  printf("in iotjs_https_curl_socket_callback \n");
+  printf("in iotjs_https_curl_socket_callback with sockfd %d and action %d \n", (int) sockfd, action);
   iotjs_https_t* https_data = (iotjs_https_t*)userp;
   IOTJS_VALIDATED_STRUCT_METHOD(iotjs_https_t, https_data);
   if (action == CURL_POLL_IN || action == CURL_POLL_OUT ||
